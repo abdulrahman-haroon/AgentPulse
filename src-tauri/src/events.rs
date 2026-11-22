@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::AppHandle;
@@ -70,10 +70,43 @@ pub struct HookEvent {
     pub wait: u64,
 }
 
+/// Writes the user's answer for a pending, unexpired request where the waiting hook will find it.
+/// The only code that can approve anything. The id must be a UUID (safe as a file name) that
+/// the hook itself sent; each request can be answered once.
+pub fn decide(map: &mut HashMap<String, Approval>, dir: &Path, request_id: &str, allow: bool, reason: &str, now: Timestamp) -> Result<(), String> {
+    if !crate::actions::is_uuid(request_id) {
+        return Err("Invalid request.".into());
+    }
+    if map.remove(request_id).is_none_or(|a| a.expires_at <= now) {
+        return Err("This request already timed out. Answer it in Claude Code.".into());
+    }
+    let reason: String = reason.chars().filter(|c| !c.is_control()).take(500).collect();
+    let decision = if allow {
+        serde_json::json!({ "behavior": "allow" })
+    } else {
+        let reason = if reason.trim().is_empty() { "Denied in AgentPulse.".to_string() } else { reason };
+        serde_json::json!({ "behavior": "deny", "message": reason })
+    };
+    fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    // tmp + rename so the hook never reads a half-written file.
+    let tmp = dir.join(format!("{request_id}.tmp"));
+    fs::write(&tmp, decision.to_string()).map_err(|e| e.to_string())?;
+    fs::rename(&tmp, dir.join(format!("{request_id}.json"))).map_err(|e| e.to_string())
+}
+
+/// Answers nobody is waiting for any more (the app restarted, or a click raced the timeout).
+pub fn clear_stale_decisions(dir: &Path) {
+    if let Ok(entries) = fs::read_dir(dir) {
+        for e in entries.flatten() {
+            let _ = fs::remove_file(e.path());
+        }
+    }
+}
+
 /// Tracks permission prompts waiting for an answer in AgentPulse. Pure, so testable.
 pub fn apply_approval(map: &mut HashMap<String, Approval>, e: &HookEvent, now: Timestamp) {
     match e.event.as_str() {
-        "PermissionRequest" if crate::actions::valid_session_id(&e.request_id) && e.tool_input.chars().count() <= MAX_TOOL_INPUT_CHARS => {
+        "PermissionRequest" if crate::actions::is_uuid(&e.request_id) && e.tool_input.chars().count() <= MAX_TOOL_INPUT_CHARS => {
             let at = e.ts.parse::<Timestamp>().unwrap_or(now);
             let wait = SignedDuration::from_secs(e.wait.clamp(1, 300) as i64);
             map.insert(
@@ -198,8 +231,8 @@ pub fn spawn_watcher(
         // Rebuild recent session state from the file's tail, without notifying.
         let len = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         if let Some(buf) = read_range(&path, len.saturating_sub(REPLAY_BYTES), len) {
-            let mut s = store.lock().unwrap();
-            let mut ap = approvals.lock().unwrap();
+            let mut s = store.lock().unwrap_or_else(|e| e.into_inner()); // keep running even if another thread panicked
+            let mut ap = approvals.lock().unwrap_or_else(|e| e.into_inner());
             let (lines, _) = complete_lines(&buf);
             for line in lines.into_iter().skip(usize::from(len > REPLAY_BYTES)) {
                 if let Ok(e) = serde_json::from_str::<HookEvent>(line) {
@@ -232,8 +265,8 @@ pub fn spawn_watcher(
             offset += used as u64;
             let mut alerts = Vec::new();
             {
-                let mut s = store.lock().unwrap();
-                let mut ap = approvals.lock().unwrap();
+                let mut s = store.lock().unwrap_or_else(|e| e.into_inner()); // keep running even if another thread panicked
+                let mut ap = approvals.lock().unwrap_or_else(|e| e.into_inner());
                 for line in lines {
                     let Ok(e) = serde_json::from_str::<HookEvent>(line) else { continue };
                     alerts.extend(apply(&mut s, &e, Timestamp::now()));
@@ -322,6 +355,54 @@ mod tests {
         assert!(ap.is_empty());
         apply_approval(&mut ap, &HookEvent { request_id: "../../evil".into(), ..req }, now);
         assert!(ap.is_empty());
+    }
+
+    #[test]
+    fn decide_only_answers_pending_unexpired_requests_once() {
+        let now = Timestamp::now();
+        let dir = std::env::temp_dir().join(format!("agentpulse-decide-{}", std::process::id()));
+        let id = "12345678-90ab-4cde-8f01-23456789abc8";
+        let pending = |secs: i64| Approval {
+            request_id: id.into(),
+            session_id: "s".into(),
+            project: "demo".into(),
+            tool_name: "Bash".into(),
+            tool_input: "{}".into(),
+            requested_at: now,
+            expires_at: now + SignedDuration::from_secs(secs),
+        };
+        let read = || fs::read_to_string(dir.join(format!("{id}.json"))).unwrap();
+
+        // allow → exactly {"behavior":"allow"}; answering twice fails
+        let mut map = HashMap::from([(id.to_string(), pending(30))]);
+        decide(&mut map, &dir, id, true, "ignored", now).unwrap();
+        assert_eq!(read(), r#"{"behavior":"allow"}"#);
+        assert!(decide(&mut map, &dir, id, true, "", now).is_err());
+
+        // deny → reason passed on, control chars stripped, capped at 500; empty → default text
+        let mut map = HashMap::from([(id.to_string(), pending(30))]);
+        decide(&mut map, &dir, id, false, &format!("not\u{7} now{}", "x".repeat(600)), now).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&read()).unwrap();
+        assert_eq!(v["behavior"], "deny");
+        assert!(v["message"].as_str().unwrap().starts_with("not now") && v["message"].as_str().unwrap().chars().count() == 500);
+        let mut map = HashMap::from([(id.to_string(), pending(30))]);
+        decide(&mut map, &dir, id, false, "  ", now).unwrap();
+        assert!(read().contains("Denied in AgentPulse."));
+
+        // expired, unknown, or non-UUID ids are refused and write nothing
+        fs::remove_dir_all(&dir).unwrap();
+        let mut map = HashMap::from([(id.to_string(), pending(0))]);
+        assert!(decide(&mut map, &dir, id, true, "", now).is_err());
+        assert!(decide(&mut HashMap::new(), &dir, id, true, "", now).is_err());
+        assert!(decide(&mut HashMap::new(), &dir, "../../evil", true, "", now).is_err());
+        assert!(!dir.exists());
+
+        // stale answers are cleared
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("old.json"), "{}").unwrap();
+        clear_stale_decisions(&dir);
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 0);
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

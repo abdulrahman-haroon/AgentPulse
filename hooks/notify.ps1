@@ -50,7 +50,8 @@ try {
 
         $decisionFile = Join-Path $dir "decisions\$id.json"
         $deadline = (Get-Date).AddSeconds($wait)
-        while ((Get-Date) -lt $deadline) {
+        while ($true) {
+            # Checked once more after the deadline, so a last-moment click isn't lost.
             if (Test-Path $decisionFile) {
                 $d = Get-Content $decisionFile -Raw | ConvertFrom-Json
                 Remove-Item $decisionFile -Force
@@ -69,6 +70,7 @@ try {
                 }
                 break  # unknown answer: fall back to the normal prompt
             }
+            if ((Get-Date) -ge $deadline) { break }
             Start-Sleep -Milliseconds 300
         }
         Add-AgentPulseEvent ([ordered]@{ event = 'PermissionTimeout'; session_id = [string]$evt.session_id; request_id = $id })

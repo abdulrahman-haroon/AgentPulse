@@ -10,6 +10,7 @@ use std::collections::HashMap;
 pub const HISTORY_DAYS: i64 = 30;
 const RECENT_HOURS: i64 = 8;
 const MAX_SESSIONS: usize = 15;
+const UNFINISHED_TURN_GRACE: SignedDuration = SignedDuration::from_mins(15);
 
 #[derive(Serialize, Debug, Default, Clone)]
 pub struct NameValue {
@@ -345,7 +346,10 @@ pub fn build<'a>(
             },
             // No hooks: the log says how the last reply ended.
             None if meta.get(id).is_some_and(|m| m.last_stop.as_deref() == Some("end_turn")) => "done",
-            None if now_ts.duration_since(last) < SignedDuration::from_mins(2) => "working",
+            // A turn that didn't finish may be a long tool call (a build, tests) that writes nothing
+            // while it runs. Call it Working for a while so Reply/Resume can't start a second
+            // Claude on a live session.
+            None if now_ts.duration_since(last) < UNFINISHED_TURN_GRACE => "working",
             None => "idle",
         };
         d.sessions.push(SessionView {
@@ -486,6 +490,7 @@ mod tests {
             req("2", "answered", ago(&now, 5), 1.0, 1),
             req("3", "quiet", ago(&now, 1 * 3600), 1.0, 1),
             req("4", "busy", ago(&now, 30), 1.0, 1),
+            req("7", "long-build", ago(&now, 5 * 60), 1.0, 1), // quiet 5 min mid-turn: a long tool call
             req("5", "closed", ago(&now, 1 * 60), 1.0, 1),
             req("6", "finished", ago(&now, 1 * 3600), 1.0, 1),
         ];
@@ -504,11 +509,12 @@ mod tests {
         assert_eq!(state("answered"), Some("working"));
         assert_eq!(state("quiet"), Some("idle"));
         assert_eq!(state("busy"), Some("working")); // inferred without hooks
+        assert_eq!(state("long-build"), Some("working")); // not Idle, so no Reply/Resume on a live session
         assert_eq!(state("finished"), Some("done")); // last reply ended with end_turn
         assert_eq!(state("fresh"), Some("working"));
         assert_eq!(state("closed"), None);
         assert_eq!(d.sessions[0].title, "Fix login bug"); // needs_you sorts first
         assert_eq!(d.sessions[0].message, "Allow Bash?");
-        assert_eq!((d.needs_you, d.working), (1, 3));
+        assert_eq!((d.needs_you, d.working), (1, 4));
     }
 }

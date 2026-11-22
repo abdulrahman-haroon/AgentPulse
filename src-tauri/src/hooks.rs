@@ -97,13 +97,35 @@ pub fn read_settings(path: &Path) -> Result<Value, String> {
     }
 }
 
+const BACKUP_PREFIX: &str = "settings.json.agentpulse-backup-";
+
+/// Keeps the oldest backup (the user's settings before AgentPulse ever touched them) and the
+/// newest one; deletes the ones in between so clicks don't pile up files in ~/.claude.
+fn prune_backups(settings: &Path) {
+    let Some(dir) = settings.parent() else { return };
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    let mut backups: Vec<PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with(BACKUP_PREFIX)))
+        .collect();
+    backups.sort();
+    if backups.len() > 2 {
+        for p in &backups[1..backups.len() - 1] {
+            let _ = fs::remove_file(p);
+        }
+    }
+}
+
 /// Backs up the current file (if any), then writes via a temp file + rename.
 /// Returns the backup path.
 pub fn write_settings(path: &Path, value: &Value) -> Result<Option<PathBuf>, String> {
     let backup = if path.exists() {
-        let stamp = jiff::ZonedDateTime::now().strftime("%Y%m%d-%H%M%S");
-        let b = path.with_file_name(format!("settings.json.agentpulse-backup-{stamp}"));
+        // Millisecond names sort by time and can't overwrite each other on quick clicks.
+        let stamp = jiff::ZonedDateTime::now().strftime("%Y%m%d-%H%M%S-%3f");
+        let b = path.with_file_name(format!("{BACKUP_PREFIX}{stamp}"));
         fs::copy(path, &b).map_err(|e| format!("Couldn't back up settings.json: {e}"))?;
+        prune_backups(path);
         Some(b)
     } else {
         None
@@ -179,6 +201,15 @@ mod tests {
         let backup = write_settings(&p, &connect(read_settings(&p).unwrap(), CMD).unwrap()).unwrap().unwrap();
         assert_eq!(fs::read_to_string(&backup).unwrap(), r#"{"model":"opus"}"#);
         assert_eq!(read_settings(&p).unwrap()["model"], "opus");
+        // Several quick saves: the original is never lost, and only 2 backups remain.
+        for _ in 0..4 {
+            write_settings(&p, &read_settings(&p).unwrap()).unwrap();
+        }
+        let mut backups: Vec<_> = fs::read_dir(&dir).unwrap().flatten().map(|e| e.path()).filter(|p| p.to_string_lossy().contains(BACKUP_PREFIX)).collect();
+        backups.sort();
+        assert_eq!(backups.len(), 2);
+        assert_eq!(fs::read_to_string(&backups[0]).unwrap(), r#"{"model":"opus"}"#);
+
         fs::write(&p, "{ broken").unwrap();
         assert!(read_settings(&p).is_err());
         fs::remove_dir_all(&dir).unwrap();

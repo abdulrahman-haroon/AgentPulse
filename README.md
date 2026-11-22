@@ -132,6 +132,7 @@ Requirements: [Rust](https://rustup.rs) (stable, MSVC on Windows), Node.js 20+, 
 npm install          # frontend dependencies
 npm run tauri dev    # run the app with hot reload
 npm test             # Rust unit tests (log parsing, pricing, stats, events, actions)
+powershell -File hooks/test-notify.ps1   # hook approval tests (sandboxed; also run in CI)
 # optional real end-to-end reply test (costs a few cents, use a throwaway session):
 # AGENTPULSE_TEST_SESSION=<uuid> AGENTPULSE_TEST_CWD=<its folder> cargo test --manifest-path src-tauri/Cargo.toml -- --ignored real_reply
 # optional smoke test on your own logs (prints counts only):
@@ -150,7 +151,7 @@ Closing a window hides it to the tray. Use the tray menu's **Quit** to exit. Lau
 
 ### CI
 
-CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs on every push and pull request: `npm audit`, type-check and build, Rust tests, and `cargo audit`. Actions are pinned to commit SHAs. The app icon is generated from [src-tauri/icons/icon-source.svg](src-tauri/icons/icon-source.svg) with `npx tauri icon`.
+CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs on every push and pull request: hook script tests, `npm audit`, type-check and build, Rust tests, and `cargo audit`. Releases build the frontend before the signing key is loaded. Actions are pinned to commit SHAs. The app icon is generated from [src-tauri/icons/icon-source.svg](src-tauri/icons/icon-source.svg) with `npx tauri icon`.
 
 ## License
 

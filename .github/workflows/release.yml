@@ -45,6 +45,12 @@ jobs:
       - name: Test before releasing
         run: cargo test --manifest-path src-tauri/Cargo.toml
 
+      # Build the frontend here, in a step with no secrets, so npm build tooling (Vite and its
+      # plugins) never runs while the signing key is in the environment. The signing step
+      # below skips this build via tauri.release.conf.json.
+      - name: Build frontend (no secrets)
+        run: npm run build
+
       - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # action-v1.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -58,3 +64,6 @@ jobs:
           releaseDraft: true
           uploadUpdaterJson: true
           updaterJsonPreferNsis: true
+          # Don't rebuild the frontend with the key present (built above). Note: Rust build
+          # scripts still run in this step; they're pinned by Cargo.lock and checked by cargo audit in CI.
+          args: --config src-tauri/tauri.release.conf.json

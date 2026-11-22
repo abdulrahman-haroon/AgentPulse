@@ -22,6 +22,12 @@ jobs:
         with:
           persist-credentials: false
 
+      # The approval path decides what Claude Code may run, so its fail-safe behavior is tested
+      # with the same Windows PowerShell 5.1 that users' hooks run under.
+      - name: Hook script tests
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File hooks/test-notify.ps1
+
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24

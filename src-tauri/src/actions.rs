@@ -76,7 +76,7 @@ impl Replies {
     }
 }
 
-pub fn valid_session_id(id: &str) -> bool {
+pub fn is_uuid(id: &str) -> bool {
     id.len() == 36
         && id.chars().enumerate().all(|(i, c)| if [8, 13, 18, 23].contains(&i) { c == '-' } else { c.is_ascii_hexdigit() })
 }
@@ -138,7 +138,7 @@ fn command(program: &Path) -> Command {
 /// VS Code sessions: focus/open the project folder in VS Code.
 /// Terminal sessions: resume in a new console window (only when not running elsewhere).
 pub fn open_session(id: &str, cwd: &str, entrypoint: &str, running: bool) -> Result<(), String> {
-    if !valid_session_id(id) {
+    if !is_uuid(id) {
         return Err("Invalid session id.".into());
     }
     let dir = existing_dir(cwd)?;
@@ -230,7 +230,7 @@ pub fn apply_stream_line(v: &mut ReplyView, line: &str) {
 /// Sends `message` to an existing session with Claude Code's headless mode and streams the
 /// result into `replies`. Caller must ensure the session isn't running elsewhere.
 pub fn start_reply(replies: &Replies, id: &str, cwd: &str, model: Option<&str>, message: &str, mode: &str) -> Result<(), String> {
-    if !valid_session_id(id) {
+    if !is_uuid(id) {
         return Err("Invalid session id.".into());
     }
     let message = message.trim();
@@ -299,11 +299,11 @@ mod tests {
 
     #[test]
     fn session_ids_must_be_uuids() {
-        assert!(valid_session_id("12345678-90ab-4cde-8f01-23456789abc8"));
-        assert!(!valid_session_id("12345678-90ab-4cde-8f01-23456789abc"));
-        assert!(!valid_session_id("12345678-90ab-4cde-8f01-23456789abcg"));
-        assert!(!valid_session_id("--dangerously-skip-permissions-xxxxxx"));
-        assert!(!valid_session_id("12345678 90ab-4cde-8f01-23456789abc8"));
+        assert!(is_uuid("12345678-90ab-4cde-8f01-23456789abc8"));
+        assert!(!is_uuid("12345678-90ab-4cde-8f01-23456789abc"));
+        assert!(!is_uuid("12345678-90ab-4cde-8f01-23456789abcg"));
+        assert!(!is_uuid("--dangerously-skip-permissions-xxxxxx"));
+        assert!(!is_uuid("12345678 90ab-4cde-8f01-23456789abc8"));
     }
 
     #[test]

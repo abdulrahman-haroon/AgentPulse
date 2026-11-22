@@ -38,25 +38,8 @@ struct AppState {
 /// sent (and that haven't expired) can be answered; the id is a UUID, so it's safe as a filename.
 #[tauri::command]
 fn decide_permission(state: TauriState<'_, AppState>, request_id: String, allow: bool, reason: String) -> Result<(), String> {
-    if !actions::valid_session_id(&request_id) {
-        return Err("Invalid request.".into());
-    }
-    let pending = state.approvals.lock().map_err(|e| e.to_string())?.remove(&request_id);
-    if pending.is_none_or(|a| a.expires_at <= Timestamp::now()) {
-        return Err("This request already timed out. Answer it in Claude Code.".into());
-    }
-    let reason: String = reason.chars().filter(|c| !c.is_control()).take(500).collect();
-    let decision = if allow {
-        serde_json::json!({ "behavior": "allow" })
-    } else {
-        let reason = if reason.trim().is_empty() { "Denied in AgentPulse.".to_string() } else { reason };
-        serde_json::json!({ "behavior": "deny", "message": reason })
-    };
-    std::fs::create_dir_all(&state.decisions_dir).map_err(|e| e.to_string())?;
-    // tmp + rename so the hook never reads a half-written file.
-    let tmp = state.decisions_dir.join(format!("{request_id}.tmp"));
-    std::fs::write(&tmp, decision.to_string()).map_err(|e| e.to_string())?;
-    std::fs::rename(&tmp, state.decisions_dir.join(format!("{request_id}.json"))).map_err(|e| e.to_string())
+    let mut approvals = state.approvals.lock().map_err(|e| e.to_string())?;
+    events::decide(&mut approvals, &state.decisions_dir, &request_id, allow, &reason, Timestamp::now())
 }
 
 #[tauri::command]
@@ -394,6 +377,8 @@ pub fn run() {
             let data = app.path().app_local_data_dir()?;
             let live: LiveStore = Arc::new(Mutex::new(HashMap::new()));
             let approvals: events::Approvals = Arc::new(Mutex::new(HashMap::new()));
+            // Answers left from a previous run have no hook waiting for them.
+            events::clear_stale_decisions(&data.join("decisions"));
             let script_path = data.join("hooks").join("notify.ps1");
             // Keep an installed hook script in sync with this app version.
             if script_path.exists() {
