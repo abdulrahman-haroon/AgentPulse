@@ -4,7 +4,7 @@
 
 Running Claude Code in three terminals at once? AgentPulse shows every session on one screen: which ones are working, which one is stuck waiting for your approval, and what each is costing. It notifies you the moment a task finishes, and shows trends your editor can't. Everything stays on your computer.
 
-> **Status:** early. Windows only for now. Builds a per-user installer (no admin needed); no signed release published yet.
+> **Status:** early. Windows only for now. Per-user installer (no admin needed) with signed in-app updates from GitHub Releases.
 
 ---
 
@@ -17,16 +17,16 @@ Running Claude Code in three terminals at once? AgentPulse shows every session o
 | **Quick reply** | Type a follow-up on any finished session and send it without leaving AgentPulse. It runs in the background on the session's own model, streams the answer into the card, and you choose the permissions: *Ask first*, *Allow edits*, or *Plan only*. |
 | **Insights** | Today's cost vs. yesterday at the same time, burn rate ($/hour right now), money saved by prompt caching, most expensive session, average per session and per request, cost by model. |
 | **History** | 7 or 30-day cost chart, top projects, and a weekday × hour heatmap of when you actually work with Claude. |
-| **Setup** | One-click **Connect hooks** (backs up your settings first, touches only AgentPulse's own entries), Disconnect, and **Start with Windows**. |
+| **Setup** | One-click **Connect hooks** (backs up your settings first, touches only AgentPulse's own entries), Disconnect, **Start with Windows**, and **Updates** (check, then install and restart). |
 | **Floating widget** | A small always-on-top card with today's cost and active sessions, for a second monitor. |
 | **Tray icon** | A status light: grey = quiet, green = something's working, amber = a session needs you. |
 | **Notifications** | Native popups when a task finishes or needs your approval, even when the app is closed. |
 
-Planned: Codex support, phone push via ntfy (opt-in), approve/deny permission prompts from the app, signed releases with auto-update, macOS/Linux.
+Planned: Codex support, phone push via ntfy (opt-in), approve/deny permission prompts from the app, macOS/Linux.
 
 ## 2. Quick start (Windows)
 
-1. Build the installer (see [Development](#6-development)): `npm install`, then `npm run tauri build`. Run `src-tauri/target/release/bundle/nsis/AgentPulse_<version>_x64-setup.exe`. It installs for your user only, no admin needed.
+1. Download `AgentPulse_<version>_x64-setup.exe` from the [latest release](../../releases/latest) and run it. It installs for your user only, no admin needed. (Or build it yourself, see [Development](#6-development).)
 2. Open AgentPulse, go to **Setup** and click **Connect hooks…**. It shows what will change, backs up `%USERPROFILE%\.claude\settings.json`, and adds one AgentPulse entry to each of the 5 hook events. Your other settings and hooks are left alone.
 3. Start a new Claude Code session. The Live board now updates instantly.
 4. Optional: turn on **Start with Windows** in Setup.
@@ -94,7 +94,8 @@ src-tauri/capabilities/   exactly which commands each window may call
 
 ## 4. Privacy and security
 
-- **100% local.** No accounts, no telemetry, no servers.
+- **100% local.** No accounts, no telemetry, no servers. The one network request is the update check to GitHub Releases, which sends nothing about you or your usage and can be turned off in Setup.
+- **Signed updates.** Every update is signed; the app verifies the signature against the public key built into it before installing anything.
 - **Read-only** access to Claude Code logs. The only file AgentPulse writes outside its own folder is `~/.claude/settings.json`, and only when you click Connect or Disconnect (backed up first, written atomically, other keys kept in order).
 - **No open ports.** Nothing on your network or in your browser can talk to AgentPulse.
 - **Locked-down UI.** Each window can call only the app functions it needs; no file, shell or network access. Strict Content Security Policy.
@@ -107,7 +108,7 @@ src-tauri/capabilities/   exactly which commands each window may call
 1. ✅ Notifications via hooks
 2. ✅ Tray app: Live board, Insights, History, floating widget, Open and Quick reply
 3. ✅ Installer, autostart, single-instance, one-click hook setup, app icon, CI
-4. Signed releases with auto-update
+4. ✅ Signed releases with in-app updates
 5. Codex support, ntfy phone push, approve/deny permission prompts from the app
 6. macOS / Linux builds
 
@@ -125,6 +126,15 @@ npm run tauri build  # per-user NSIS installer in src-tauri/target/release/bundl
 ```
 
 Closing a window hides it to the tray. Use the tray menu's **Quit** to exit. Launching AgentPulse again just brings the open window forward.
+
+### Releasing (maintainers)
+
+1. One-time: add two repository secrets (Settings → Secrets and variables → Actions): `TAURI_SIGNING_PRIVATE_KEY` (contents of the private key file) and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. The matching public key is in `src-tauri/tauri.conf.json`. Never commit the private key; if it's lost, existing installs can't verify new updates.
+2. Bump `version` in `package.json` (the app reads its version from there), commit, then tag and push: `git tag v0.2.0 && git push origin v0.2.0`.
+3. [.github/workflows/release.yml](.github/workflows/release.yml) tests, builds, signs, and creates a **draft** release with the installer and `latest.json`.
+4. Review the draft and click **Publish**. Installed apps see the update on their next check.
+
+### CI
 
 CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs on every push and pull request: `npm audit`, type-check and build, Rust tests, and `cargo audit`. Actions are pinned to commit SHAs. The app icon is generated from [src-tauri/icons/icon-source.svg](src-tauri/icons/icon-source.svg) with `npx tauri icon`.
 

@@ -2,7 +2,7 @@
 //! to `<app local data>/events.jsonl`; this thread tails it, keeps live per-session state
 //! and shows notifications. Lines are untrusted: parsed as JSON, shown only as plain text.
 
-use chrono::{DateTime, Duration as Age, Local};
+use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
@@ -29,7 +29,7 @@ pub enum State {
 #[derive(Clone, Debug)]
 pub struct Live {
     pub state: State,
-    pub since: DateTime<Local>,
+    pub since: Timestamp,
     pub project: String,
     pub message: String,
 }
@@ -48,8 +48,8 @@ pub struct HookEvent {
 }
 
 /// Updates session state for one event. Returns (title, body) when a notification should show.
-pub fn apply(store: &mut HashMap<String, Live>, e: &HookEvent, now: DateTime<Local>) -> Option<(String, String)> {
-    let since = DateTime::parse_from_rfc3339(&e.ts).map(|t| t.with_timezone(&Local)).unwrap_or(now);
+pub fn apply(store: &mut HashMap<String, Live>, e: &HookEvent, now: Timestamp) -> Option<(String, String)> {
+    let since = e.ts.parse::<Timestamp>().unwrap_or(now);
     let project = clean(if e.project.is_empty() { "Claude Code" } else { &e.project });
     let message = clean(&e.message);
     let prev = store.get(&e.session_id).map(|l| l.state);
@@ -67,7 +67,7 @@ pub fn apply(store: &mut HashMap<String, Live>, e: &HookEvent, now: DateTime<Loc
     if !e.session_id.is_empty() {
         store.insert(e.session_id.clone(), Live { state, since, project, message });
     }
-    store.retain(|_, l| now - l.since < Age::hours(24));
+    store.retain(|_, l| now.duration_since(l.since) < SignedDuration::from_hours(24));
     toast
 }
 
@@ -120,7 +120,7 @@ pub fn spawn_watcher(
             let (lines, _) = complete_lines(&buf);
             for line in lines.into_iter().skip(usize::from(len > REPLAY_BYTES)) {
                 if let Ok(e) = serde_json::from_str::<HookEvent>(line) {
-                    apply(&mut s, &e, Local::now());
+                    apply(&mut s, &e, Timestamp::now());
                 }
             }
             on_change(&app, &s);
@@ -149,7 +149,7 @@ pub fn spawn_watcher(
             let mut s = store.lock().unwrap();
             for line in lines {
                 let Ok(e) = serde_json::from_str::<HookEvent>(line) else { continue };
-                if let Some((title, body)) = apply(&mut s, &e, Local::now()) {
+                if let Some((title, body)) = apply(&mut s, &e, Timestamp::now()) {
                     let _ = app.notification().builder().title(title).body(body).show();
                 }
             }
@@ -177,7 +177,7 @@ mod tests {
     #[test]
     fn session_lifecycle_and_toasts() {
         let mut s = HashMap::new();
-        let now = Local::now();
+        let now = Timestamp::now();
         assert_eq!(apply(&mut s, &ev("SessionStart", "a"), now), None);
         assert_eq!(apply(&mut s, &ev("UserPromptSubmit", "a"), now), None);
         assert_eq!(s["a"].state, State::Working);
@@ -202,11 +202,11 @@ mod tests {
         let mut s = HashMap::new();
         let mut long = ev("Notification", "b");
         long.message = "x".repeat(500);
-        let (_, body) = apply(&mut s, &long, Local::now()).unwrap();
+        let (_, body) = apply(&mut s, &long, Timestamp::now()).unwrap();
         assert_eq!(body.chars().count(), MAX_TEXT_CHARS + 3);
         let mut old = ev("Stop", "c");
-        old.ts = (Local::now() - Age::hours(30)).to_rfc3339();
-        apply(&mut s, &old, Local::now());
+        old.ts = (Timestamp::now() - SignedDuration::from_hours(30)).to_string();
+        apply(&mut s, &old, Timestamp::now());
         assert!(!s.contains_key("c"));
     }
 }

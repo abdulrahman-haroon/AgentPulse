@@ -95,5 +95,27 @@ export const dismissReply = (id: string) => invoke("dismiss_reply", { id });
 export const hookStatus = () => invoke<HookStatus>("hook_status");
 export const connectHooks = () => invoke<HookStatus>("connect_hooks");
 export const disconnectHooks = () => invoke<HookStatus>("disconnect_hooks");
+export type UpdateInfo = { current: string; available: string | null; notes: string | null };
+export const appVersion = () => invoke<string>("app_version");
+export const checkUpdate = () => invoke<UpdateInfo>("check_update");
+export const installUpdate = () => invoke("install_update");
+
+const AUTO_CHECK_KEY = "agentpulse.autoUpdateCheck";
+/** Per-machine preference; defaults to on. Storage can be unavailable, so never throw. */
+export function autoCheckEnabled() {
+  try {
+    return localStorage.getItem(AUTO_CHECK_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+export function setAutoCheck(on: boolean) {
+  try {
+    localStorage.setItem(AUTO_CHECK_KEY, on ? "on" : "off");
+  } catch {
+    /* preference just won't persist */
+  }
+}
+
 export const getAutostart = () => invoke<boolean>("get_autostart");
 export const setAutostart = (enabled: boolean) => invoke<boolean>("set_autostart", { enabled });

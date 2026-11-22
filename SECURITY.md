@@ -1,6 +1,6 @@
 # Security Policy
 
-AgentPulse runs entirely on your machine. It reads your local AI-agent logs **read-only**, sends nothing anywhere by default, and contains no telemetry.
+AgentPulse runs entirely on your machine. It reads your local Claude Code logs **read-only**, contains no telemetry, and makes one optional network request: an update check to this repository's GitHub Releases. Updates are signed, and the app refuses any update whose signature doesn't match the public key built into it.
 
 ## Reporting a vulnerability
 
@@ -11,4 +11,4 @@ Include what you found, how to reproduce it, and the impact. You'll get a reply 
 
 ## Scope
 
-In scope: anything that lets AgentPulse leak log contents, run code it shouldn't, write outside its own data folder, or be controlled by another program or website.
+In scope: anything that lets AgentPulse leak log contents, run code it shouldn't, write outside its own data folder (other than the user-approved hook entries in `~/.claude/settings.json`), install an unsigned or tampered update, or be controlled by another program or website.

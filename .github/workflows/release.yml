@@ -1,0 +1,60 @@
+name: Release
+
+# Push a tag like v0.2.0 (matching package.json's version) to build a signed installer
+# and a DRAFT GitHub Release. Review the draft, then click "Publish": only published
+# releases are seen by the in-app updater.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      contents: write # create the draft release and upload assets
+    steps:
+      # Actions are pinned to commit SHAs (tag in the comment) so a moved tag can't change what runs.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Tag must match package.json version
+        shell: pwsh
+        run: |
+          $v = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ("v$v" -ne $env:GITHUB_REF_NAME) { throw "Tag $env:GITHUB_REF_NAME doesn't match package.json version v$v" }
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: src-tauri
+
+      - name: Test before releasing
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # action-v1.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signs the update so installed apps can verify it came from us.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: AgentPulse ${{ github.ref_name }}
+          releaseBody: "Download and run `AgentPulse_*_x64-setup.exe` (installs for your user, no admin needed). Existing installs update from inside the app."
+          releaseDraft: true
+          uploadUpdaterJson: true
+          updaterJsonPreferNsis: true

@@ -5,7 +5,7 @@ mod logs;
 mod pricing;
 mod stats;
 
-use chrono::{Duration, Local};
+use jiff::{SignedDuration, Timestamp, ZonedDateTime};
 use events::{Live, LiveStore, State};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -91,7 +91,7 @@ async fn dashboard(app: AppHandle) -> Result<stats::Dashboard, String> {
         let mut cache = state.cache.lock().map_err(|e| e.to_string())?;
         refresh(state, &mut cache);
         let live = state.live.lock().map_err(|e| e.to_string())?.clone();
-        let mut d = stats::build(cache.requests(), &cache.titles(), &cache.meta(), &live, Local::now());
+        let mut d = stats::build(cache.requests(), &cache.titles(), &cache.meta(), &live, &ZonedDateTime::now());
         d.replies = state.replies.views();
         if let Ok(mut s) = state.states.lock() {
             *s = d.sessions.iter().map(|v| (v.id.clone(), v.state)).collect();
@@ -182,6 +182,41 @@ fn set_autostart(app: AppHandle, enabled: bool) -> Result<bool, String> {
     a.is_enabled().map_err(|e| e.to_string())
 }
 
+#[derive(serde::Serialize)]
+struct UpdateInfo {
+    current: String,
+    /// Newer version on GitHub Releases, if any.
+    available: Option<String>,
+    notes: Option<String>,
+}
+
+#[tauri::command]
+fn app_version(app: AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
+/// Asks GitHub Releases for a newer version. The only network call AgentPulse makes.
+#[tauri::command]
+async fn check_update(app: AppHandle) -> Result<UpdateInfo, String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let update = app.updater().map_err(|e| e.to_string())?.check().await.map_err(|e| format!("Couldn't check for updates: {e}"))?;
+    Ok(UpdateInfo {
+        current: app.package_info().version.to_string(),
+        available: update.as_ref().map(|u| u.version.clone()),
+        notes: update.and_then(|u| u.body),
+    })
+}
+
+/// Downloads the update, verifies its signature against our public key, installs, restarts.
+#[tauri::command]
+async fn install_update(app: AppHandle) -> Result<(), String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let update = app.updater().map_err(|e| e.to_string())?.check().await.map_err(|e| e.to_string())?;
+    let Some(update) = update else { return Err("Already up to date.".into()) };
+    update.download_and_install(|_, _| {}, || {}).await.map_err(|e| format!("Update failed: {e}"))?;
+    app.restart();
+}
+
 /// Passed by the login item so AgentPulse starts in the tray without opening a window.
 const MINIMIZED_FLAG: &str = "--minimized";
 
@@ -217,7 +252,7 @@ fn dot(rgb: [u8; 3]) -> Image<'static> {
 
 fn update_tray(app: &AppHandle, live: &HashMap<String, Live>) {
     let Some(tray) = app.tray_by_id("main") else { return };
-    let recent = Local::now() - Duration::hours(8);
+    let recent = Timestamp::now() - SignedDuration::from_hours(8);
     let count = |s| live.values().filter(|l| l.state == s && l.since > recent).count();
     let (needs, working) = (count(State::NeedsYou), count(State::Working));
     let (color, tip) = match (needs, working) {
@@ -239,6 +274,7 @@ pub fn run() {
         // Must be first: a second launch just focuses the running instance.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)))
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec![MINIMIZED_FLAG]),
@@ -250,6 +286,9 @@ pub fn run() {
             disconnect_hooks,
             get_autostart,
             set_autostart,
+            app_version,
+            check_update,
+            install_update,
             toggle_widget,
             open_session,
             send_reply,

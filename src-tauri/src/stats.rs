@@ -3,7 +3,7 @@
 use crate::actions::ReplyView;
 use crate::events::{Live, State};
 use crate::logs::{Request, SessionMeta};
-use chrono::{DateTime, Datelike, Duration, Local, Timelike};
+use jiff::{SignedDuration, Timestamp, ToSpan, ZonedDateTime};
 use serde::Serialize;
 use std::collections::HashMap;
 
@@ -66,8 +66,8 @@ pub struct Dashboard {
 }
 
 struct Agg<'a> {
-    first: DateTime<Local>,
-    last: DateTime<Local>,
+    first: Timestamp,
+    last: Timestamp,
     cost: f64,
     tokens: u64,
     requests: u64,
@@ -93,7 +93,8 @@ pub fn build<'a>(
     titles: &HashMap<&str, &str>,
     meta: &HashMap<&str, &SessionMeta>,
     live: &HashMap<String, Live>,
-    now: DateTime<Local>,
+    // In the user's time zone: decides what "today", weekdays and hours mean.
+    now: &ZonedDateTime,
 ) -> Dashboard {
     // The same request can appear in several files (resumed sessions): dedupe globally.
     let mut unique: HashMap<&str, &Request> = HashMap::new();
@@ -111,9 +112,11 @@ pub fn build<'a>(
     }
     all.extend(unique.into_values());
 
-    let today = now.date_naive();
-    let yesterday = today - Duration::days(1);
-    let hour_ago = now - Duration::hours(1);
+    let tz = now.time_zone().clone();
+    let now_ts = now.timestamp();
+    let today = now.date();
+    let yesterday = today.yesterday().ok();
+    let hour_ago = now_ts - SignedDuration::from_hours(1);
     let mut d = Dashboard {
         today_cost: 0.0,
         today_tokens: 0,
@@ -126,7 +129,7 @@ pub fn build<'a>(
         models_today: vec![],
         daily: (0..HISTORY_DAYS)
             .rev()
-            .map(|i| DayPoint { date: (today - Duration::days(i)).to_string(), cost: 0.0, tokens: 0 })
+            .map(|i| DayPoint { date: today.checked_sub(i.days()).map(|d| d.to_string()).unwrap_or_default(), cost: 0.0, tokens: 0 })
             .collect(),
         projects: vec![],
         heatmap: vec![[0; 24]; 7],
@@ -141,8 +144,9 @@ pub fn build<'a>(
     let mut sessions: HashMap<&str, Agg> = HashMap::new();
 
     for r in &all {
-        let date = r.ts.date_naive();
-        let age = (today - date).num_days();
+        let local = r.ts.to_zoned_datetime(tz.clone());
+        let date = local.date();
+        let age = date.until(today).map(|s| i64::from(s.get_days())).unwrap_or(-1);
         if !(0..HISTORY_DAYS).contains(&age) {
             continue;
         }
@@ -150,7 +154,7 @@ pub fn build<'a>(
         let day = &mut d.daily[(HISTORY_DAYS - 1 - age) as usize];
         day.cost += cost;
         day.tokens += r.tokens;
-        d.heatmap[r.ts.weekday().num_days_from_monday() as usize][r.ts.hour() as usize] += 1;
+        d.heatmap[local.weekday().to_monday_zero_offset() as usize][local.hour() as usize] += 1;
 
         let s = sessions.entry(&r.session).or_insert(Agg {
             first: r.ts,
@@ -184,7 +188,7 @@ pub fn build<'a>(
             if r.ts > hour_ago {
                 d.burn_rate_per_hour += cost;
             }
-        } else if date == yesterday && r.ts.time() <= now.time() {
+        } else if Some(date) == yesterday && local.time() <= now.time() {
             d.yesterday_cost_by_now += cost;
         }
     }
@@ -204,18 +208,18 @@ pub fn build<'a>(
     d.projects = ranked(projects, 8);
 
     // Live board: recently active sessions plus any the hooks say are open.
-    let recent = now - Duration::hours(RECENT_HOURS);
+    let recent = now_ts - SignedDuration::from_hours(RECENT_HOURS);
     let mut ids: Vec<&str> = sessions.iter().filter(|(_, a)| a.last >= recent).map(|(id, _)| *id).collect();
     ids.extend(live.iter().filter(|(id, l)| l.state != State::Ended && !sessions.contains_key(id.as_str())).map(|(id, _)| id.as_str()));
 
     for id in ids {
         let agg = sessions.get(id);
         let hook = live.get(id);
-        let last = agg.map(|a| a.last).or(hook.map(|h| h.since)).unwrap_or(now);
+        let last = agg.map(|a| a.last).or(hook.map(|h| h.since)).unwrap_or(now_ts);
         let state = match hook {
             Some(h) if h.state == State::Ended => continue,
             // Log moved on after the permission prompt → it was answered.
-            Some(h) if h.state == State::NeedsYou && last > h.since + Duration::seconds(10) => "working",
+            Some(h) if h.state == State::NeedsYou && last > h.since + SignedDuration::from_secs(10) => "working",
             Some(h) => match h.state {
                 State::Working => "working",
                 State::NeedsYou => "needs_you",
@@ -223,7 +227,7 @@ pub fn build<'a>(
             },
             // No hooks: the log says how the last reply ended.
             None if meta.get(id).is_some_and(|m| m.last_stop.as_deref() == Some("end_turn")) => "done",
-            None if now - last < Duration::minutes(2) => "working",
+            None if now_ts.duration_since(last) < SignedDuration::from_mins(2) => "working",
             None => "idle",
         };
         d.sessions.push(SessionView {
@@ -232,10 +236,10 @@ pub fn build<'a>(
             project: agg.map(|a| a.project.to_string()).or(hook.map(|h| h.project.clone())).unwrap_or_default(),
             state,
             message: hook.filter(|_| state == "needs_you").map(|h| h.message.clone()).unwrap_or_default(),
-            started: agg.map(|a| a.first).unwrap_or(last).to_rfc3339(),
-            last_active: last.to_rfc3339(),
+            started: agg.map(|a| a.first).unwrap_or(last).to_string(),
+            last_active: last.to_string(),
             // When the current state began; only known when hooks report it.
-            state_since: hook.map(|h| h.since.to_rfc3339()),
+            state_since: hook.map(|h| h.since.to_string()),
             cost: agg.map_or(0.0, |a| a.cost),
             requests: agg.map_or(0, |a| a.requests),
             model: agg.map(|a| a.model.to_string()).unwrap_or_default(),
@@ -259,7 +263,7 @@ pub fn build<'a>(
 mod tests {
     use super::*;
 
-    fn req(key: &str, session: &str, ts: DateTime<Local>, cost: f64, output: u64) -> Request {
+    fn req(key: &str, session: &str, ts: Timestamp, cost: f64, output: u64) -> Request {
         Request {
             key: Some(key.into()),
             ts,
@@ -273,12 +277,16 @@ mod tests {
         }
     }
 
-    fn noon() -> DateTime<Local> {
-        use chrono::TimeZone;
-        Local.with_ymd_and_hms(2026, 6, 15, 12, 0, 0).unwrap()
+    /// Fixed local noon, so tests never straddle midnight.
+    fn noon() -> ZonedDateTime {
+        jiff::civil::date(2026, 6, 15).at(12, 0, 0, 0).to_zoned_datetime(jiff::tz::TimeZone::system()).unwrap()
     }
 
-    fn live(state: State, since: DateTime<Local>) -> Live {
+    fn ago(now: &ZonedDateTime, secs: i64) -> Timestamp {
+        now.timestamp() - SignedDuration::from_secs(secs)
+    }
+
+    fn live(state: State, since: Timestamp) -> Live {
         Live { state, since, project: "demo".into(), message: "Allow Bash?".into() }
     }
 
@@ -286,12 +294,12 @@ mod tests {
     fn totals_dedupe_across_files_and_history() {
         let now = noon();
         let reqs = [
-            req("a", "s1", now - Duration::minutes(5), 2.0, 10),
-            req("a", "s1", now - Duration::minutes(5), 2.0, 10), // same request in a resumed file
-            req("b", "s1", now - Duration::days(3), 5.0, 10),
-            req("c", "s2", now - Duration::days(40), 9.0, 10), // outside history
+            req("a", "s1", ago(&now, 5 * 60), 2.0, 10),
+            req("a", "s1", ago(&now, 5 * 60), 2.0, 10), // same request in a resumed file
+            req("b", "s1", ago(&now, 3 * 86_400), 5.0, 10),
+            req("c", "s2", ago(&now, 40 * 86_400), 9.0, 10), // outside history
         ];
-        let d = build(reqs.iter(), &HashMap::new(), &HashMap::new(), &HashMap::new(), now);
+        let d = build(reqs.iter(), &HashMap::new(), &HashMap::new(), &HashMap::new(), &now);
         assert_eq!(d.today_requests, 1);
         assert_eq!(d.today_cost, 2.0);
         assert_eq!(d.burn_rate_per_hour, 2.0);
@@ -305,10 +313,10 @@ mod tests {
     #[test]
     fn session_counts_under_the_folder_it_started_in() {
         let now = noon();
-        let mut later = req("2", "s", now - Duration::minutes(1), 3.0, 1);
+        let mut later = req("2", "s", ago(&now, 1 * 60), 3.0, 1);
         later.project = "src".into(); // Claude cd'd into a subfolder
-        let reqs = [later, req("1", "s", now - Duration::minutes(9), 1.0, 1)];
-        let d = build(reqs.iter(), &HashMap::new(), &HashMap::new(), &HashMap::new(), now);
+        let reqs = [later, req("1", "s", ago(&now, 9 * 60), 1.0, 1)];
+        let d = build(reqs.iter(), &HashMap::new(), &HashMap::new(), &HashMap::new(), &now);
         assert_eq!(d.projects.len(), 1);
         assert_eq!((d.projects[0].name.as_str(), d.projects[0].cost), ("demo", 4.0));
         assert_eq!(d.sessions[0].project, "demo");
@@ -318,22 +326,22 @@ mod tests {
     fn session_states_from_hooks_and_logs() {
         let now = noon();
         let reqs = [
-            req("1", "waiting", now - Duration::minutes(3), 1.0, 1),
-            req("2", "answered", now - Duration::seconds(5), 1.0, 1),
-            req("3", "quiet", now - Duration::hours(1), 1.0, 1),
-            req("4", "busy", now - Duration::seconds(30), 1.0, 1),
-            req("5", "closed", now - Duration::minutes(1), 1.0, 1),
-            req("6", "finished", now - Duration::hours(1), 1.0, 1),
+            req("1", "waiting", ago(&now, 3 * 60), 1.0, 1),
+            req("2", "answered", ago(&now, 5), 1.0, 1),
+            req("3", "quiet", ago(&now, 1 * 3600), 1.0, 1),
+            req("4", "busy", ago(&now, 30), 1.0, 1),
+            req("5", "closed", ago(&now, 1 * 60), 1.0, 1),
+            req("6", "finished", ago(&now, 1 * 3600), 1.0, 1),
         ];
         let finished = SessionMeta { last_stop: Some("end_turn".into()), entrypoint: "cli".into(), ..Default::default() };
         let meta = HashMap::from([("finished", &finished)]);
         let mut l = HashMap::new();
-        l.insert("waiting".to_string(), live(State::NeedsYou, now - Duration::minutes(2)));
-        l.insert("answered".to_string(), live(State::NeedsYou, now - Duration::minutes(2)));
-        l.insert("closed".to_string(), live(State::Ended, now));
-        l.insert("fresh".to_string(), live(State::Working, now)); // hook seen, no log yet
+        l.insert("waiting".to_string(), live(State::NeedsYou, ago(&now, 2 * 60)));
+        l.insert("answered".to_string(), live(State::NeedsYou, ago(&now, 2 * 60)));
+        l.insert("closed".to_string(), live(State::Ended, now.timestamp()));
+        l.insert("fresh".to_string(), live(State::Working, now.timestamp())); // hook seen, no log yet
         let titles = HashMap::from([("waiting", "Fix login bug")]);
-        let d = build(reqs.iter(), &titles, &meta, &l, now);
+        let d = build(reqs.iter(), &titles, &meta, &l, &now);
 
         let state = |id: &str| d.sessions.iter().find(|s| s.id == id).map(|s| s.state);
         assert_eq!(state("waiting"), Some("needs_you"));

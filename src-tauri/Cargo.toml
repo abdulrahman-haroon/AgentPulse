@@ -18,11 +18,13 @@ tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-notification = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-autostart = "2"
+# Signed updates from GitHub Releases (minisign signature checked against the pubkey in tauri.conf.json).
+tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 # preserve_order: rewriting the user's settings.json must not reorder their keys.
 serde_json = { version = "1", features = ["preserve_order"] }
-# Local-timezone day boundaries for "today" stats.
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+# Dates/times; local-timezone day boundaries for "today" stats (handles DST correctly).
+jiff = "1"
 
 # Dependencies (serde_json does the heavy log parsing) are optimized even in dev builds,
 # so the first parse of a large log history isn't painfully slow while developing.

@@ -93,7 +93,7 @@ pub fn read_settings(path: &Path) -> Result<Value, String> {
 /// Returns the backup path.
 pub fn write_settings(path: &Path, value: &Value) -> Result<Option<PathBuf>, String> {
     let backup = if path.exists() {
-        let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+        let stamp = jiff::ZonedDateTime::now().strftime("%Y%m%d-%H%M%S");
         let b = path.with_file_name(format!("settings.json.agentpulse-backup-{stamp}"));
         fs::copy(path, &b).map_err(|e| format!("Couldn't back up settings.json: {e}"))?;
         Some(b)

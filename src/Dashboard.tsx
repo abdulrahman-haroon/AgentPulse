@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { hookStatus, toggleWidget, useDashboard, type HookStatus } from "./api";
+import { autoCheckEnabled, checkUpdate, hookStatus, toggleWidget, useDashboard, type HookStatus, type UpdateInfo } from "./api";
 import { since } from "./format";
 import { ChartIcon, PinIcon, PlugIcon, PulseIcon, SparkIcon } from "./components/Icons";
 import { LiveView } from "./views/LiveView";
@@ -11,7 +11,7 @@ const PAGES = [
   { id: "live", label: "Live", icon: <PulseIcon />, subtitle: "Every Claude Code session, right now" },
   { id: "insights", label: "Insights", icon: <SparkIcon />, subtitle: "What today is costing, and where it goes" },
   { id: "history", label: "History", icon: <ChartIcon />, subtitle: "Trends, projects and your working hours" },
-  { id: "setup", label: "Setup", icon: <PlugIcon />, subtitle: "Hooks and privacy" },
+  { id: "setup", label: "Setup", icon: <PlugIcon />, subtitle: "Hooks, startup, updates and privacy" },
 ] as const;
 type PageId = (typeof PAGES)[number]["id"];
 
@@ -24,6 +24,9 @@ export default function Dashboard() {
   const [hooks, setHooks] = useState<HookStatus | null>(null);
   const recheck = useCallback(() => { hookStatus().then(setHooks).catch(() => {}); }, []);
   useEffect(recheck, [recheck]);
+  // One quiet update check per launch (opt-out in Setup). Failures stay silent here.
+  const [update, setUpdate] = useState<UpdateInfo | null>(null);
+  useEffect(() => { if (autoCheckEnabled()) checkUpdate().then(setUpdate).catch(() => {}); }, []);
 
   const current = PAGES.find((p) => p.id === page)!;
   return (
@@ -43,6 +46,7 @@ export default function Dashboard() {
             {p.icon}
             <span className="nav-label">{p.label}</span>
             {p.id === "live" && data && data.needs_you > 0 && <span className="nav-count">{data.needs_you}</span>}
+            {p.id === "setup" && update?.available && <span className="nav-count nav-update" title={`Version ${update.available} available`}>1</span>}
           </button>
         ))}
         <div className="sidebar-foot">
@@ -64,7 +68,7 @@ export default function Dashboard() {
 
         {error && <p className="callout callout-error" role="alert">Couldn't read usage: {error}</p>}
         {page === "setup" ? (
-          <SetupView status={hooks} setStatus={setHooks} recheck={recheck} />
+          <SetupView status={hooks} setStatus={setHooks} recheck={recheck} update={update} />
         ) : !data ? (
           <div className="loading">
             <span className="loading-bar" />

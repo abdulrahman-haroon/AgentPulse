@@ -4,7 +4,7 @@
 //! The format is undocumented, so every field is optional and bad lines are skipped.
 
 use crate::pricing::{self, Tokens};
-use chrono::{DateTime, Local};
+use jiff::Timestamp;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
@@ -17,7 +17,7 @@ use std::time::SystemTime;
 pub struct Request {
     /// `message.id:requestId`; the same request can appear in several files (resumed sessions).
     pub key: Option<String>,
-    pub ts: DateTime<Local>,
+    pub ts: Timestamp,
     pub session: String,
     pub project: String,
     pub model: String,
@@ -36,7 +36,7 @@ pub struct SessionMeta {
     pub entrypoint: String,
     /// stop_reason of the latest assistant message ("end_turn" = finished, waiting for you).
     pub last_stop: Option<String>,
-    pub last_ts: Option<DateTime<Local>>,
+    pub last_ts: Option<Timestamp>,
     /// Model of the latest assistant message, so replies continue on the same model.
     pub model: Option<String>,
 }
@@ -121,8 +121,7 @@ impl FileData {
     }
 
     fn ingest_assistant(&mut self, l: LogLine, session: String) {
-        let Some(ts) = l.timestamp.as_deref().and_then(|t| DateTime::parse_from_rfc3339(t).ok()) else { return };
-        let ts = ts.with_timezone(&Local);
+        let Some(ts) = l.timestamp.as_deref().and_then(|t| t.parse::<Timestamp>().ok()) else { return };
         let Some(m) = l.message else { return };
 
         let meta = self.meta.entry(session.clone()).or_default();
