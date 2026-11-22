@@ -21,8 +21,9 @@ Running Claude Code in three terminals at once? AgentPulse shows every session o
 | **Floating widget** | A small always-on-top card with today's cost and active sessions, for a second monitor. |
 | **Tray icon** | A status light: grey = quiet, green = something's working, amber = a session needs you. |
 | **Notifications** | Native popups when a task finishes or needs your approval, even when the app is closed. |
+| **Phone notifications** | Optional push to your phone through [ntfy](https://ntfy.sh) (free, open source), so you can walk away while Claude works. Off by default, private random topic, generic messages unless you opt in to details, self-hosted servers supported. |
 
-Planned: Codex support, phone push via ntfy (opt-in), approve/deny permission prompts from the app, macOS/Linux.
+Planned: Codex support, approve/deny permission prompts from the app, macOS/Linux.
 
 ## 2. Quick start (Windows)
 
@@ -88,13 +89,17 @@ src-tauri/src/
   events.rs               tails the events file, session state, notifications
   actions.rs              Open / Quick reply: the only code that starts processes
   hooks.rs                connect/disconnect hooks in settings.json (pure merge + safe write)
+  settings.rs             AgentPulse's own settings (validated, atomic save)
+  push.rs                 opt-in ntfy phone notifications
   pricing.rs              model prices and cost math
 src-tauri/capabilities/   exactly which commands each window may call
 ```
 
 ## 4. Privacy and security
 
-- **100% local.** No accounts, no telemetry, no servers. The one network request is the update check to GitHub Releases, which sends nothing about you or your usage and can be turned off in Setup.
+- **100% local.** No accounts, no telemetry, no servers. Only two things ever use the network, both from the Rust side (the UI itself has no network access):
+  - the **update check** to GitHub Releases (sends nothing about you; can be turned off in Setup);
+  - **phone notifications**, only if you turn them on: a short message to your private ntfy topic. By default it just says "Claude finished" / "Claude needs you", with no project names or code.
 - **Signed updates.** Every update is signed; the app verifies the signature against the public key built into it before installing anything.
 - **Read-only** access to Claude Code logs. The only file AgentPulse writes outside its own folder is `~/.claude/settings.json`, and only when you click Connect or Disconnect (backed up first, written atomically, other keys kept in order).
 - **No open ports.** Nothing on your network or in your browser can talk to AgentPulse.
@@ -109,8 +114,9 @@ src-tauri/capabilities/   exactly which commands each window may call
 2. ✅ Tray app: Live board, Insights, History, floating widget, Open and Quick reply
 3. ✅ Installer, autostart, single-instance, one-click hook setup, app icon, CI
 4. ✅ Signed releases with in-app updates
-5. Codex support, ntfy phone push, approve/deny permission prompts from the app
-6. macOS / Linux builds
+5. ✅ Phone notifications (ntfy)
+6. Codex support, approve/deny permission prompts from the app
+7. macOS / Linux builds
 
 ## 6. Development
 

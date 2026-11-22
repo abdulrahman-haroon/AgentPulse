@@ -111,6 +111,14 @@ small { font-size: 0.55em; font-weight: 500; color: var(--muted); margin-left: 2
   background: var(--warning); color: #0b0b0b;
   font-size: 12px; font-weight: 650; text-align: center;
 }
+.phone { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
+.steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 10px; color: var(--ink-2); }
+.topic { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
+.topic code { padding: 4px 8px; border-radius: 6px; background: var(--page); border: 1px solid var(--border); user-select: all; }
+.checks { display: flex; flex-direction: column; }
+.checks .check-row { margin-top: 8px; }
+.text { width: 100%; font: inherit; color: var(--ink); background: var(--page); border: 1px solid var(--border-strong); border-radius: 8px; padding: 6px 10px; }
+.text:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .nav-update { background: var(--accent); color: #fff; }
 .check-row { display: flex; gap: 8px; align-items: flex-start; margin-top: 14px; font-size: 12.5px; color: var(--ink-2); cursor: pointer; }
 .check-row input { margin-top: 2px; accent-color: var(--accent); }

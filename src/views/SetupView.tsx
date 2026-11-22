@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { connectHooks, disconnectHooks, getAutostart, setAutostart, type HookStatus, type UpdateInfo } from "../api";
 import { AlertIcon, CheckIcon } from "../components/Icons";
 import { UpdatesCard } from "../components/UpdatesCard";
+import { PhoneCard } from "../components/PhoneCard";
 
 const WHAT: Record<string, string> = {
   SessionStart: "a session opens",
@@ -106,12 +107,14 @@ export function SetupView({ status, setStatus, recheck, update }: Props) {
         <p className="muted">Starts quietly in the tray when you sign in, so notifications and the Live board are always ready.</p>
       </section>
 
+      <PhoneCard hooksConnected={connected} />
+
       <UpdatesCard initial={update} />
 
       <section className="card">
         <h2 className="card-title">Privacy</h2>
         <ul className="plain">
-          <li>Everything stays on this computer. No accounts, servers, or telemetry. The only network request is the optional update check to GitHub.</li>
+          <li>Everything stays on this computer. No accounts, servers, or telemetry. Network requests happen only for the update check to GitHub (optional) and phone notifications (off unless you turn them on).</li>
           <li>Claude Code logs are only read. The only file AgentPulse ever changes is settings.json, when you click Connect or Disconnect.</li>
           <li>No network ports are opened; hooks talk to the app through a local file.</li>
         </ul>

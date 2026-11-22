@@ -1,6 +1,6 @@
 # Security Policy
 
-AgentPulse runs entirely on your machine. It reads your local Claude Code logs **read-only**, contains no telemetry, and makes one optional network request: an update check to this repository's GitHub Releases. Updates are signed, and the app refuses any update whose signature doesn't match the public key built into it.
+AgentPulse runs entirely on your machine. It reads your local Claude Code logs **read-only**, contains no telemetry, and uses the network only for an optional update check to this repository's GitHub Releases and, if the user turns it on, phone notifications via ntfy (generic text by default). Updates are signed, and the app refuses any update whose signature doesn't match the public key built into it.
 
 ## Reporting a vulnerability
 

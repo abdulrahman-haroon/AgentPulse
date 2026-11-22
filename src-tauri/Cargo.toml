@@ -20,6 +20,10 @@ tauri-plugin-single-instance = "2"
 tauri-plugin-autostart = "2"
 # Signed updates from GitHub Releases (minisign signature checked against the pubkey in tauri.conf.json).
 tauri-plugin-updater = "2"
+# Already in the build via the updater; used directly for opt-in ntfy phone push.
+reqwest = { version = "0.13", default-features = false, features = ["json"] }
+# Same rustls the updater uses; we install its `ring` provider before our own HTTPS calls.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 serde = { version = "1", features = ["derive"] }
 # preserve_order: rewriting the user's settings.json must not reorder their keys.
 serde_json = { version = "1", features = ["preserve_order"] }

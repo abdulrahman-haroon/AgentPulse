@@ -3,6 +3,8 @@ mod events;
 mod hooks;
 mod logs;
 mod pricing;
+mod push;
+mod settings;
 mod stats;
 
 use jiff::{SignedDuration, Timestamp, ZonedDateTime};
@@ -25,6 +27,51 @@ struct AppState {
     states: Mutex<HashMap<String, &'static str>>,
     /// Installed copy of the hook script that settings.json points at.
     script_path: PathBuf,
+    settings: Mutex<settings::Settings>,
+    settings_path: PathBuf,
+}
+
+#[tauri::command]
+fn get_settings(state: TauriState<'_, AppState>) -> Result<settings::Settings, String> {
+    state.settings.lock().map(|s| s.clone()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn save_settings(state: TauriState<'_, AppState>, settings: settings::Settings) -> Result<settings::Settings, String> {
+    settings::save(&state.settings_path, &settings)?;
+    *state.settings.lock().map_err(|e| e.to_string())? = settings.clone();
+    Ok(settings)
+}
+
+/// Sends a sample "needs you" push with the given (unsaved) settings so the user can check their phone.
+#[tauri::command]
+async fn test_push(push: settings::PushSettings) -> Result<(), String> {
+    settings::validate_push(&push)?;
+    let sample = events::Alert {
+        kind: events::AlertKind::NeedsYou,
+        project: "AgentPulse".into(),
+        title: "AgentPulse test".into(),
+        body: "Phone notifications are working.".into(),
+    };
+    let mut body = push::payload(&push, &sample);
+    body["title"] = "AgentPulse test".into();
+    body["message"] = "Phone notifications are working.".into();
+    push::send(&push, &body).await
+}
+
+/// Desktop notification for every alert; phone push if the user turned it on.
+fn on_alert(app: &AppHandle, alert: &events::Alert) {
+    use tauri_plugin_notification::NotificationExt;
+    let _ = app.notification().builder().title(&alert.title).body(&alert.body).show();
+    let push = app.state::<AppState>().settings.lock().map(|s| s.push.clone()).unwrap_or_default();
+    if push::wanted(&push, alert) {
+        let body = push::payload(&push, alert);
+        tauri::async_runtime::spawn(async move {
+            if let Err(e) = push::send(&push, &body).await {
+                eprintln!("[agentpulse] phone push failed: {e}");
+            }
+        });
+    }
 }
 
 /// Runs blocking work (file reads, locks the cache) off both the UI and async threads.
@@ -289,6 +336,9 @@ pub fn run() {
             app_version,
             check_update,
             install_update,
+            get_settings,
+            save_settings,
+            test_push,
             toggle_widget,
             open_session,
             send_reply,
@@ -311,6 +361,8 @@ pub fn run() {
                 replies: actions::Replies::default(),
                 states: Mutex::new(HashMap::new()),
                 script_path,
+                settings: Mutex::new(settings::load(&data.join("settings.json"))),
+                settings_path: data.join("settings.json"),
             });
             if !std::env::args().any(|a| a == MINIMIZED_FLAG) {
                 show_main(app.handle());
@@ -339,7 +391,7 @@ pub fn run() {
                 .build(app)?;
 
             let events_file = data.join("events.jsonl");
-            events::spawn_watcher(app.handle().clone(), events_file, live, update_tray);
+            events::spawn_watcher(app.handle().clone(), events_file, live, on_alert, update_tray);
 
             // Parse log history in the background so the first dashboard call is fast.
             let handle = app.handle().clone();

@@ -117,5 +117,27 @@ export function setAutoCheck(on: boolean) {
   }
 }
 
+// Mirrors settings::Settings in src-tauri/src/settings.rs.
+export type PushSettings = {
+  enabled: boolean;
+  server: string;
+  topic: string;
+  on_done: boolean;
+  on_needs_you: boolean;
+  include_details: boolean;
+};
+export type Settings = { push: PushSettings };
+export const getSettings = () => invoke<Settings>("get_settings");
+export const saveSettings = (settings: Settings) => invoke<Settings>("save_settings", { settings });
+export const testPush = (push: PushSettings) => invoke("test_push", { push });
+
+/** Unguessable ntfy topic from the OS CSPRNG (on ntfy.sh the topic name is the only access control). */
+export function randomTopic() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+  const bytes = crypto.getRandomValues(new Uint8Array(24));
+  // 256 % 57 bias is negligible for a 24-char topic (~140 bits).
+  return "agentpulse-" + Array.from(bytes, (b) => chars[b % chars.length]).join("");
+}
+
 export const getAutostart = () => invoke<boolean>("get_autostart");
 export const setAutostart = (enabled: boolean) => invoke<boolean>("set_autostart", { enabled });

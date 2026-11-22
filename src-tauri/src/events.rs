@@ -11,7 +11,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::AppHandle;
-use tauri_plugin_notification::NotificationExt;
 
 const MAX_FILE_BYTES: u64 = 1024 * 1024;
 const REPLAY_BYTES: u64 = 256 * 1024;
@@ -47,20 +46,36 @@ pub struct HookEvent {
     pub ts: String,
 }
 
-/// Updates session state for one event. Returns (title, body) when a notification should show.
-pub fn apply(store: &mut HashMap<String, Live>, e: &HookEvent, now: Timestamp) -> Option<(String, String)> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AlertKind {
+    Done,
+    NeedsYou,
+}
+
+/// Something worth telling the user about (desktop notification, maybe phone push).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Alert {
+    pub kind: AlertKind,
+    pub project: String,
+    pub title: String,
+    pub body: String,
+}
+
+/// Updates session state for one event. Returns an alert when the user should be told.
+pub fn apply(store: &mut HashMap<String, Live>, e: &HookEvent, now: Timestamp) -> Option<Alert> {
     let since = e.ts.parse::<Timestamp>().unwrap_or(now);
     let project = clean(if e.project.is_empty() { "Claude Code" } else { &e.project });
     let message = clean(&e.message);
     let prev = store.get(&e.session_id).map(|l| l.state);
+    let alert = |kind, title: String, body: String| Some(Alert { kind, project: project.clone(), title, body });
 
-    let (state, toast) = match e.event.as_str() {
+    let (state, alert) = match e.event.as_str() {
         "SessionStart" => (State::Done, None),
         "UserPromptSubmit" => (State::Working, None),
-        "Stop" => (State::Done, Some((format!("Claude finished: {project}"), "Task complete.".to_string()))),
+        "Stop" => (State::Done, alert(AlertKind::Done, format!("Claude finished: {project}"), "Task complete.".into())),
         // Claude Code also sends an "idle" reminder after a finished turn; don't re-alert for it.
         "Notification" if e.notification_type == "idle_prompt" && prev == Some(State::Done) => (State::Done, None),
-        "Notification" => (State::NeedsYou, Some((format!("Claude needs you: {project}"), message.clone()))),
+        "Notification" => (State::NeedsYou, alert(AlertKind::NeedsYou, format!("Claude needs you: {project}"), message.clone())),
         "SessionEnd" => (State::Ended, None),
         _ => return None,
     };
@@ -68,7 +83,7 @@ pub fn apply(store: &mut HashMap<String, Live>, e: &HookEvent, now: Timestamp) -
         store.insert(e.session_id.clone(), Live { state, since, project, message });
     }
     store.retain(|_, l| now.duration_since(l.since) < SignedDuration::from_hours(24));
-    toast
+    alert
 }
 
 /// Drops control characters and caps length so a hostile line can't flood the UI.
@@ -102,11 +117,13 @@ fn read_range(path: &PathBuf, from: u64, to: u64) -> Option<Vec<u8>> {
     Some(buf)
 }
 
-/// Tails the events file forever. `on_change` runs after any state change (e.g. to update the tray).
+/// Tails the events file forever. `on_alert` runs for each new alert (not for replayed history);
+/// `on_change` runs after any state change (e.g. to update the tray).
 pub fn spawn_watcher(
     app: AppHandle,
     path: PathBuf,
     store: LiveStore,
+    on_alert: impl Fn(&AppHandle, &Alert) + Send + 'static,
     on_change: impl Fn(&AppHandle, &HashMap<String, Live>) + Send + 'static,
 ) {
     std::thread::spawn(move || {
@@ -146,14 +163,18 @@ pub fn spawn_watcher(
             let Some(buf) = read_range(&path, offset, len) else { continue };
             let (lines, used) = complete_lines(&buf);
             offset += used as u64;
-            let mut s = store.lock().unwrap();
-            for line in lines {
-                let Ok(e) = serde_json::from_str::<HookEvent>(line) else { continue };
-                if let Some((title, body)) = apply(&mut s, &e, Timestamp::now()) {
-                    let _ = app.notification().builder().title(title).body(body).show();
+            let mut alerts = Vec::new();
+            {
+                let mut s = store.lock().unwrap();
+                for line in lines {
+                    let Ok(e) = serde_json::from_str::<HookEvent>(line) else { continue };
+                    alerts.extend(apply(&mut s, &e, Timestamp::now()));
                 }
+                on_change(&app, &s);
             }
-            on_change(&app, &s);
+            for a in &alerts {
+                on_alert(&app, a);
+            }
         }
     });
 }
@@ -183,7 +204,8 @@ mod tests {
         assert_eq!(s["a"].state, State::Working);
         let mut n = ev("Notification", "a");
         n.message = "needs\u{7} ok".into();
-        assert_eq!(apply(&mut s, &n, now), Some(("Claude needs you: demo".into(), "needs ok".into())));
+        let a = apply(&mut s, &n, now).unwrap();
+        assert_eq!((a.kind, a.title.as_str(), a.body.as_str()), (AlertKind::NeedsYou, "Claude needs you: demo", "needs ok"));
         assert_eq!(s["a"].state, State::NeedsYou);
         assert!(apply(&mut s, &ev("Stop", "a"), now).is_some());
         assert_eq!(s["a"].state, State::Done);
@@ -202,7 +224,7 @@ mod tests {
         let mut s = HashMap::new();
         let mut long = ev("Notification", "b");
         long.message = "x".repeat(500);
-        let (_, body) = apply(&mut s, &long, Timestamp::now()).unwrap();
+        let body = apply(&mut s, &long, Timestamp::now()).unwrap().body;
         assert_eq!(body.chars().count(), MAX_TEXT_CHARS + 3);
         let mut old = ev("Stop", "c");
         old.ts = (Timestamp::now() - SignedDuration::from_hours(30)).to_string();
