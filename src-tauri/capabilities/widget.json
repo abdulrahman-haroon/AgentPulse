@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "widget",
+  "description": "Floating widget: read the dashboard, hide itself, and be dragged by its title area.",
+  "windows": ["widget"],
+  "permissions": ["allow-dashboard", "allow-toggle-widget", "core:window:allow-start-dragging"]
+}

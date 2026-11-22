@@ -62,6 +62,14 @@ pub fn cost(model: &str, t: &Tokens, fast: bool) -> Option<f64> {
     Some(if fast { usd * 2.0 } else { usd })
 }
 
+/// USD saved because cache reads were billed below the full input price.
+pub fn cache_savings(model: &str, t: &Tokens, fast: bool) -> f64 {
+    let prompt = t.input + t.cache_read + t.cache_write_5m + t.cache_write_1h;
+    let Some(p) = price_for(model, prompt) else { return 0.0 };
+    let usd = t.cache_read as f64 * (p.input - p.cache_read) / 1_000_000.0;
+    if fast { usd * 2.0 } else { usd }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -85,6 +93,14 @@ mod tests {
         assert!((c - 37.20).abs() < 1e-9, "{c}");
         let fast = cost("claude-opus-5-5", &t(1_000_000, 0, 0, 0, 0), true).unwrap();
         assert!((fast - 8.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn cache_savings_math() {
+        // 1M cache reads on Opus 5.5: would be $4 at input price, cost $0.20 → saved $3.80
+        let s = cache_savings("claude-opus-5-5", &t(0, 0, 1_000_000, 0, 0), false);
+        assert!((s - 3.80).abs() < 1e-9);
+        assert_eq!(cache_savings("<synthetic>", &t(0, 0, 1_000_000, 0, 0), false), 0.0);
     }
 
     #[test]
