@@ -6,7 +6,11 @@ use serde_json::{json, Map, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub const HOOK_EVENTS: [&str; 5] = ["SessionStart", "UserPromptSubmit", "Notification", "Stop", "SessionEnd"];
+pub const HOOK_EVENTS: [&str; 6] = ["SessionStart", "UserPromptSubmit", "Notification", "PermissionRequest", "Stop", "SessionEnd"];
+
+/// Seconds Claude Code lets the PermissionRequest hook run. Longer than the longest wait the
+/// script allows (settings::MAX_APPROVAL_WAIT) so the script, not a kill, ends the wait.
+pub const PERMISSION_HOOK_TIMEOUT: u64 = crate::settings::MAX_APPROVAL_WAIT + 30;
 
 /// The hook script, compiled into the app so installs don't depend on where the repo lives.
 pub const SCRIPT: &str = include_str!("../../hooks/notify.ps1");
@@ -71,11 +75,15 @@ pub fn connect(settings: Value, command: &str) -> Result<Value, String> {
     let hooks = root.entry("hooks").or_insert_with(|| Value::Object(Map::new()));
     let hooks = hooks.as_object_mut().ok_or("`hooks` in settings.json isn't an object; not touching it.")?;
     for event in HOOK_EVENTS {
+        let mut hook = json!({ "type": "command", "command": command });
+        if event == "PermissionRequest" {
+            hook["timeout"] = json!(PERMISSION_HOOK_TIMEOUT);
+        }
         let groups = hooks.entry(event).or_insert_with(|| json!([]));
         groups
             .as_array_mut()
             .ok_or_else(|| format!("`hooks.{event}` isn't a list; not touching it."))?
-            .push(json!({ "hooks": [{ "type": "command", "command": command }] }));
+            .push(json!({ "hooks": [hook] }));
     }
     Ok(settings)
 }
@@ -139,6 +147,8 @@ mod tests {
             assert_eq!(groups.len(), 1, "{e}");
             assert_eq!(groups[0]["hooks"][0]["command"], CMD);
         }
+        assert_eq!(s["hooks"]["PermissionRequest"][0]["hooks"][0]["timeout"], 330);
+        assert!(s["hooks"]["Stop"][0]["hooks"][0].get("timeout").is_none());
     }
 
     #[test]

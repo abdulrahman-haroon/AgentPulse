@@ -35,6 +35,25 @@ pub struct Live {
 
 pub type LiveStore = Arc<Mutex<HashMap<String, Live>>>;
 
+/// A permission prompt the hook is holding open while it waits for the user's answer here.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Approval {
+    pub request_id: String,
+    pub session_id: String,
+    pub project: String,
+    pub tool_name: String,
+    /// Full tool input as compact JSON. Never truncated for display: the user must see
+    /// exactly what they approve.
+    pub tool_input: String,
+    pub requested_at: Timestamp,
+    /// After this the hook has given up and Claude Code shows its own prompt.
+    pub expires_at: Timestamp,
+}
+
+pub type Approvals = Arc<Mutex<HashMap<String, Approval>>>;
+
+const MAX_TOOL_INPUT_CHARS: usize = 20_000;
+
 #[derive(Deserialize, Debug, Default)]
 #[serde(default)]
 pub struct HookEvent {
@@ -44,6 +63,38 @@ pub struct HookEvent {
     pub session_id: String,
     pub notification_type: String,
     pub ts: String,
+    // PermissionRequest / PermissionResolved / PermissionTimeout
+    pub request_id: String,
+    pub tool_name: String,
+    pub tool_input: String,
+    pub wait: u64,
+}
+
+/// Tracks permission prompts waiting for an answer in AgentPulse. Pure, so testable.
+pub fn apply_approval(map: &mut HashMap<String, Approval>, e: &HookEvent, now: Timestamp) {
+    match e.event.as_str() {
+        "PermissionRequest" if crate::actions::valid_session_id(&e.request_id) && e.tool_input.chars().count() <= MAX_TOOL_INPUT_CHARS => {
+            let at = e.ts.parse::<Timestamp>().unwrap_or(now);
+            let wait = SignedDuration::from_secs(e.wait.clamp(1, 300) as i64);
+            map.insert(
+                e.request_id.clone(),
+                Approval {
+                    request_id: e.request_id.clone(),
+                    session_id: e.session_id.clone(),
+                    project: clean(&e.project),
+                    tool_name: clean(&e.tool_name),
+                    tool_input: e.tool_input.clone(),
+                    requested_at: at,
+                    expires_at: at + wait,
+                },
+            );
+        }
+        "PermissionResolved" | "PermissionTimeout" => {
+            map.remove(&e.request_id);
+        }
+        _ => {}
+    }
+    map.retain(|_, a| a.expires_at > now);
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,6 +127,19 @@ pub fn apply(store: &mut HashMap<String, Live>, e: &HookEvent, now: Timestamp) -
         // Claude Code also sends an "idle" reminder after a finished turn; don't re-alert for it.
         "Notification" if e.notification_type == "idle_prompt" && prev == Some(State::Done) => (State::Done, None),
         "Notification" => (State::NeedsYou, alert(AlertKind::NeedsYou, format!("Claude needs you: {project}"), message.clone())),
+        "PermissionRequest" => {
+            let tool = clean(&e.tool_name);
+            let body = format!("Allow {tool}? Approve or deny it in AgentPulse.");
+            let live_msg = format!("Wants to use {tool}");
+            let a = alert(AlertKind::NeedsYou, format!("Approval needed: {project}"), body);
+            if !e.session_id.is_empty() {
+                store.insert(e.session_id.clone(), Live { state: State::NeedsYou, since, project, message: live_msg });
+            }
+            return a;
+        }
+        "PermissionResolved" => (State::Working, None),
+        // The hook gave up waiting; Claude Code now shows its own prompt.
+        "PermissionTimeout" => (State::NeedsYou, None),
         "SessionEnd" => (State::Ended, None),
         _ => return None,
     };
@@ -123,6 +187,7 @@ pub fn spawn_watcher(
     app: AppHandle,
     path: PathBuf,
     store: LiveStore,
+    approvals: Approvals,
     on_alert: impl Fn(&AppHandle, &Alert) + Send + 'static,
     on_change: impl Fn(&AppHandle, &HashMap<String, Live>) + Send + 'static,
 ) {
@@ -134,10 +199,12 @@ pub fn spawn_watcher(
         let len = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         if let Some(buf) = read_range(&path, len.saturating_sub(REPLAY_BYTES), len) {
             let mut s = store.lock().unwrap();
+            let mut ap = approvals.lock().unwrap();
             let (lines, _) = complete_lines(&buf);
             for line in lines.into_iter().skip(usize::from(len > REPLAY_BYTES)) {
                 if let Ok(e) = serde_json::from_str::<HookEvent>(line) {
                     apply(&mut s, &e, Timestamp::now());
+                    apply_approval(&mut ap, &e, Timestamp::now()); // expired ones are dropped
                 }
             }
             on_change(&app, &s);
@@ -166,9 +233,11 @@ pub fn spawn_watcher(
             let mut alerts = Vec::new();
             {
                 let mut s = store.lock().unwrap();
+                let mut ap = approvals.lock().unwrap();
                 for line in lines {
                     let Ok(e) = serde_json::from_str::<HookEvent>(line) else { continue };
                     alerts.extend(apply(&mut s, &e, Timestamp::now()));
+                    apply_approval(&mut ap, &e, Timestamp::now());
                 }
                 on_change(&app, &s);
             }
@@ -217,6 +286,42 @@ mod tests {
         apply(&mut s, &ev("SessionEnd", "a"), now);
         assert_eq!(s["a"].state, State::Ended);
         assert_eq!(apply(&mut s, &ev("PreToolUse", "a"), now), None);
+    }
+
+    #[test]
+    fn approvals_lifecycle() {
+        let now = Timestamp::now();
+        let mut ap = HashMap::new();
+        let mut s = HashMap::new();
+        let id = "12345678-90ab-4cde-8f01-23456789abc8";
+        let req = HookEvent {
+            event: "PermissionRequest".into(),
+            session_id: "s".into(),
+            project: "demo".into(),
+            request_id: id.into(),
+            tool_name: "Bash".into(),
+            tool_input: r#"{"command":"rm -rf build"}"#.into(),
+            wait: 60,
+            ..Default::default()
+        };
+        apply_approval(&mut ap, &req, now);
+        let a = apply(&mut s, &req, now).unwrap();
+        assert_eq!((a.kind, a.title.as_str()), (AlertKind::NeedsYou, "Approval needed: demo"));
+        assert_eq!(ap[id].tool_input, r#"{"command":"rm -rf build"}"#); // shown in full
+        assert_eq!(s["s"].state, State::NeedsYou);
+
+        let done = HookEvent { event: "PermissionResolved".into(), session_id: "s".into(), request_id: id.into(), ..Default::default() };
+        apply_approval(&mut ap, &done, now);
+        apply(&mut s, &done, now);
+        assert!(ap.is_empty());
+        assert_eq!(s["s"].state, State::Working);
+
+        // expired requests disappear; non-UUID ids are ignored
+        apply_approval(&mut ap, &req, now);
+        apply_approval(&mut ap, &HookEvent::default(), now + SignedDuration::from_secs(61));
+        assert!(ap.is_empty());
+        apply_approval(&mut ap, &HookEvent { request_id: "../../evil".into(), ..req }, now);
+        assert!(ap.is_empty());
     }
 
     #[test]

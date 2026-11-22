@@ -63,6 +63,46 @@ pub struct Dashboard {
     pub working: usize,
     /// Quick replies sent from AgentPulse (filled in by lib.rs, not computed here).
     pub replies: Vec<ReplyView>,
+    /// Permission prompts waiting for an answer here (filled in by lib.rs).
+    pub approvals: Vec<ApprovalView>,
+}
+
+#[derive(Serialize, Debug, PartialEq)]
+pub struct ApprovalView {
+    pub request_id: String,
+    pub session_title: String,
+    pub project: String,
+    pub tool_name: String,
+    /// The part people scan first: the shell command or file path.
+    pub summary: String,
+    /// The complete tool input, pretty-printed. Always shown in full.
+    pub detail: String,
+    pub expires_at: String,
+}
+
+pub fn approval_views(approvals: &HashMap<String, crate::events::Approval>, titles: &HashMap<&str, &str>) -> Vec<ApprovalView> {
+    let mut v: Vec<_> = approvals
+        .values()
+        .map(|a| {
+            let input: serde_json::Value = serde_json::from_str(&a.tool_input).unwrap_or(serde_json::Value::String(a.tool_input.clone()));
+            let summary = ["command", "file_path", "url", "pattern", "path"]
+                .iter()
+                .find_map(|k| input[k].as_str())
+                .unwrap_or("")
+                .to_string();
+            ApprovalView {
+                request_id: a.request_id.clone(),
+                session_title: titles.get(a.session_id.as_str()).map(|t| t.to_string()).unwrap_or_else(|| "Untitled session".into()),
+                project: a.project.clone(),
+                tool_name: a.tool_name.clone(),
+                summary,
+                detail: serde_json::to_string_pretty(&input).unwrap_or_else(|_| a.tool_input.clone()),
+                expires_at: a.expires_at.to_string(),
+            }
+        })
+        .collect();
+    v.sort_by(|a, b| a.expires_at.cmp(&b.expires_at));
+    v
 }
 
 struct Agg<'a> {
@@ -137,6 +177,7 @@ pub fn build<'a>(
         needs_you: 0,
         working: 0,
         replies: vec![],
+        approvals: vec![],
     };
     let mut models = HashMap::new();
     let mut projects = HashMap::new();

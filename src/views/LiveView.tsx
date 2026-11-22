@@ -1,6 +1,7 @@
 import type { Dashboard } from "../api";
 import { money } from "../format";
 import { SessionCard } from "../components/SessionCard";
+import { ApprovalCard } from "../components/ApprovalCard";
 
 export function LiveView({ data, hooksMissing }: { data: Dashboard; hooksMissing: boolean }) {
   const now = Date.now();
@@ -8,6 +9,12 @@ export function LiveView({ data, hooksMissing }: { data: Dashboard; hooksMissing
   const replies = new Map(data.replies.map((r) => [r.session_id, r]));
   return (
     <>
+      {data.approvals.length > 0 && (
+        <section className="approvals" aria-label="Waiting for your approval">
+          {data.approvals.map((a) => <ApprovalCard key={a.request_id} a={a} />)}
+        </section>
+      )}
+
       <section className="strip" aria-label="Right now">
         <div className={`strip-item ${data.needs_you ? "strip-alert" : ""}`}>
           <span className="strip-value">{data.needs_you}</span>

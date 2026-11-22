@@ -14,6 +14,7 @@ fn main() {
         "get_settings",
         "save_settings",
         "test_push",
+        "decide_permission",
         "toggle_widget",
         "open_session",
         "send_reply",

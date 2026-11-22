@@ -14,6 +14,7 @@ Running Claude Code in three terminals at once? AgentPulse shows every session o
 |---|---|
 | **Live** | A card per Claude Code session across all projects and terminals: *Working*, *Needs you* (with the permission question), *Done*, or *Idle*, with its auto-generated title, project, model and cost so far. |
 | **Open** | Jump straight to a session: VS Code sessions focus their VS Code window; finished terminal sessions reopen in a new terminal with `claude --resume`. |
+| **Approve in AgentPulse** | Optional. When Claude Code asks permission to run a command or edit a file, the request appears at the top of the Live board with the **full command**, a countdown, and **Allow once** / **Deny** (with a reason Claude sees). No answer in time, or AgentPulse not running, and Claude Code shows its normal prompt. Nothing is ever auto-approved. |
 | **Quick reply** | Type a follow-up on any finished session and send it without leaving AgentPulse. It runs in the background on the session's own model, streams the answer into the card, and you choose the permissions: *Ask first*, *Allow edits*, or *Plan only*. |
 | **Insights** | Today's cost vs. yesterday at the same time, burn rate ($/hour right now), money saved by prompt caching, most expensive session, average per session and per request, cost by model. |
 | **History** | 7 or 30-day cost chart, top projects, and a weekday × hour heatmap of when you actually work with Claude. |
@@ -23,12 +24,12 @@ Running Claude Code in three terminals at once? AgentPulse shows every session o
 | **Notifications** | Native popups when a task finishes or needs your approval, even when the app is closed. |
 | **Phone notifications** | Optional push to your phone through [ntfy](https://ntfy.sh) (free, open source), so you can walk away while Claude works. Off by default, private random topic, generic messages unless you opt in to details, self-hosted servers supported. |
 
-Planned: Codex support, approve/deny permission prompts from the app, macOS/Linux.
+Planned: Codex support, macOS/Linux.
 
 ## 2. Quick start (Windows)
 
 1. Download `AgentPulse_<version>_x64-setup.exe` from the [latest release](../../releases/latest) and run it. It installs for your user only, no admin needed. (Or build it yourself, see [Development](#6-development).)
-2. Open AgentPulse, go to **Setup** and click **Connect hooks…**. It shows what will change, backs up `%USERPROFILE%\.claude\settings.json`, and adds one AgentPulse entry to each of the 5 hook events. Your other settings and hooks are left alone.
+2. Open AgentPulse, go to **Setup** and click **Connect hooks…**. It shows what will change, backs up `%USERPROFILE%\.claude\settings.json`, and adds one AgentPulse entry to each of the 6 hook events. Your other settings and hooks are left alone.
 3. Start a new Claude Code session. The Live board now updates instantly.
 4. Optional: turn on **Start with Windows** in Setup.
 
@@ -43,6 +44,7 @@ Add this `hooks` block (merge it with any you already have), pointing at `hooks/
     "SessionStart":     [{ "hooks": [{ "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"C:/path/to/AgentPulse/hooks/notify.ps1\"" }] }],
     "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"C:/path/to/AgentPulse/hooks/notify.ps1\"" }] }],
     "Notification":     [{ "hooks": [{ "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"C:/path/to/AgentPulse/hooks/notify.ps1\"" }] }],
+    "PermissionRequest":[{ "hooks": [{ "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"C:/path/to/AgentPulse/hooks/notify.ps1\"", "timeout": 330 }] }],
     "Stop":             [{ "hooks": [{ "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"C:/path/to/AgentPulse/hooks/notify.ps1\"" }] }],
     "SessionEnd":       [{ "hooks": [{ "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"C:/path/to/AgentPulse/hooks/notify.ps1\"" }] }]
   }
@@ -104,6 +106,7 @@ src-tauri/capabilities/   exactly which commands each window may call
 - **Read-only** access to Claude Code logs. The only file AgentPulse writes outside its own folder is `~/.claude/settings.json`, and only when you click Connect or Disconnect (backed up first, written atomically, other keys kept in order).
 - **No open ports.** Nothing on your network or in your browser can talk to AgentPulse.
 - **Locked-down UI.** Each window can call only the app functions it needs; no file, shell or network access. Strict Content Security Policy.
+- **Approvals fail safe.** Uses Claude Code's official `PermissionRequest` hook. The hook only waits when you turned the feature on *and* the app is running; it hands the request over with a random ID and accepts exactly two answers for exactly that ID: allow once, or deny. Anything else (timeout, app closed, odd answer, error) produces no output, so Claude Code shows its normal prompt. There is no "always allow".
 - **Launching Claude Code / VS Code safely.** The UI only sends a session ID (and your reply text). Folders come from AgentPulse's own log index, session IDs must be UUIDs, programs are found on PATH by fixed name, arguments are passed without a shell, reply text goes through stdin, and Claude Code session variables inherited from a parent session are stripped. Replies never use "bypass permissions".
 - Hook input is treated as untrusted data: it's re-serialized as JSON, cleaned of control characters, length-capped, and only ever shown as plain text.
 - Found a problem? See [SECURITY.md](SECURITY.md).
@@ -115,8 +118,9 @@ src-tauri/capabilities/   exactly which commands each window may call
 3. ✅ Installer, autostart, single-instance, one-click hook setup, app icon, CI
 4. ✅ Signed releases with in-app updates
 5. ✅ Phone notifications (ntfy)
-6. Codex support, approve/deny permission prompts from the app
-7. macOS / Linux builds
+6. ✅ Approve or deny Claude Code permission prompts from the app
+7. Codex support
+8. macOS / Linux builds
 
 ## 6. Development
 

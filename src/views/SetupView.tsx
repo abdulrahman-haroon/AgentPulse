@@ -1,13 +1,18 @@
 import { useEffect, useState } from "react";
-import { connectHooks, disconnectHooks, getAutostart, setAutostart, type HookStatus, type UpdateInfo } from "../api";
+import {
+  connectHooks, disconnectHooks, getAutostart, getSettings, saveSettings, setAutostart,
+  type HookStatus, type Settings, type UpdateInfo,
+} from "../api";
 import { AlertIcon, CheckIcon } from "../components/Icons";
 import { UpdatesCard } from "../components/UpdatesCard";
 import { PhoneCard } from "../components/PhoneCard";
+import { ApprovalsSettingsCard } from "../components/ApprovalsSettingsCard";
 
 const WHAT: Record<string, string> = {
   SessionStart: "a session opens",
   UserPromptSubmit: "you send a prompt → Working",
-  Notification: "Claude asks for permission → Needs you",
+  Notification: "Claude is waiting for you → Needs you",
+  PermissionRequest: "Claude asks to use a tool → approve here (if on)",
   Stop: "a task finishes → Done + notification",
   SessionEnd: "a session closes",
 };
@@ -20,6 +25,13 @@ export function SetupView({ status, setStatus, recheck, update }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [autostart, setAuto] = useState<boolean | null>(null);
   useEffect(() => { getAutostart().then(setAuto).catch(() => setAuto(null)); }, []);
+  // One owner for app settings, so the cards never overwrite each other's changes.
+  const [settings, setSettings] = useState<Settings | null>(null);
+  useEffect(() => { getSettings().then(setSettings).catch((e) => setError(String(e))); }, []);
+  const savePart = async (patch: Partial<Settings>) => {
+    if (!settings) return;
+    setSettings(await saveSettings({ ...settings, ...patch }));
+  };
 
   const connected = !!status && status.missing.length === 0;
   const partial = !!status && status.installed.length > 0 && !connected;
@@ -70,7 +82,7 @@ export function SetupView({ status, setStatus, recheck, update }: Props) {
             <p><strong>AgentPulse will:</strong></p>
             <ul className="plain">
               <li>Back up <code>{status?.settings_path ?? "settings.json"}</code> next to it (timestamped copy).</li>
-              <li>Add one AgentPulse hook to each of the 5 events above. Your other settings and hooks stay exactly as they are.</li>
+              <li>Add one AgentPulse hook to each of the 6 events above. Your other settings and hooks stay exactly as they are.</li>
               <li>Install the hook script into AgentPulse's own data folder, so it keeps working wherever this app lives.</li>
             </ul>
             <p className="muted">New Claude Code sessions pick it up. Already-open sessions need a restart. You can disconnect at any time.</p>
@@ -107,7 +119,16 @@ export function SetupView({ status, setStatus, recheck, update }: Props) {
         <p className="muted">Starts quietly in the tray when you sign in, so notifications and the Live board are always ready.</p>
       </section>
 
-      <PhoneCard hooksConnected={connected} />
+      {settings && (
+        <>
+          <ApprovalsSettingsCard
+            approvals={settings.approvals}
+            save={(approvals) => savePart({ approvals })}
+            hookReady={!!status?.installed.includes("PermissionRequest")}
+          />
+          <PhoneCard push={settings.push} save={(push) => savePart({ push })} hooksConnected={connected} />
+        </>
+      )}
 
       <UpdatesCard initial={update} />
 

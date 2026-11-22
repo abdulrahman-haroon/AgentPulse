@@ -20,10 +20,13 @@ export default function Dashboard() {
   const [fast, setFast] = useState(false);
   const { data, error, updatedAt } = useDashboard(fast ? 1500 : 4000);
   // Poll faster while a quick reply is streaming in.
-  useEffect(() => setFast(!!data?.replies.some((r) => r.status === "running")), [data]);
+  useEffect(() => setFast(!!data && (data.approvals.length > 0 || data.replies.some((r) => r.status === "running"))), [data]);
   const [hooks, setHooks] = useState<HookStatus | null>(null);
   const recheck = useCallback(() => { hookStatus().then(setHooks).catch(() => {}); }, []);
   useEffect(recheck, [recheck]);
+  // A new approval request jumps to the Live page, where the card is.
+  const approvalCount = data?.approvals.length ?? 0;
+  useEffect(() => { if (approvalCount > 0) setPage("live"); }, [approvalCount]);
   // One quiet update check per launch (opt-out in Setup). Failures stay silent here.
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   useEffect(() => { if (autoCheckEnabled()) checkUpdate().then(setUpdate).catch(() => {}); }, []);
@@ -45,7 +48,9 @@ export default function Dashboard() {
           >
             {p.icon}
             <span className="nav-label">{p.label}</span>
-            {p.id === "live" && data && data.needs_you > 0 && <span className="nav-count">{data.needs_you}</span>}
+            {p.id === "live" && data && data.needs_you + data.approvals.length > 0 && (
+              <span className="nav-count">{Math.max(data.needs_you, data.approvals.length)}</span>
+            )}
             {p.id === "setup" && update?.available && <span className="nav-count nav-update" title={`Version ${update.available} available`}>1</span>}
           </button>
         ))}

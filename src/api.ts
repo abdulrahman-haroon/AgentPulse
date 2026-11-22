@@ -31,6 +31,15 @@ export type Reply = {
   error: string;
 };
 export type PermissionMode = "default" | "acceptEdits" | "plan";
+export type Approval = {
+  request_id: string;
+  session_title: string;
+  project: string;
+  tool_name: string;
+  summary: string;
+  detail: string;
+  expires_at: string;
+};
 export type Dashboard = {
   today_cost: number;
   today_tokens: number;
@@ -48,6 +57,7 @@ export type Dashboard = {
   needs_you: number;
   working: number;
   replies: Reply[];
+  approvals: Approval[];
 };
 export type HookStatus = {
   installed: string[];
@@ -126,7 +136,10 @@ export type PushSettings = {
   on_needs_you: boolean;
   include_details: boolean;
 };
-export type Settings = { push: PushSettings };
+export type ApprovalSettings = { enabled: boolean; wait_seconds: number };
+export type Settings = { push: PushSettings; approvals: ApprovalSettings };
+export const decidePermission = (requestId: string, allow: boolean, reason: string) =>
+  invoke("decide_permission", { requestId, allow, reason });
 export const getSettings = () => invoke<Settings>("get_settings");
 export const saveSettings = (settings: Settings) => invoke<Settings>("save_settings", { settings });
 export const testPush = (push: PushSettings) => invoke("test_push", { push });

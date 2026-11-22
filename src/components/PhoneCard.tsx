@@ -1,25 +1,22 @@
-import { useEffect, useState } from "react";
-import { getSettings, randomTopic, saveSettings, testPush, type PushSettings, type Settings } from "../api";
+import { useState } from "react";
+import { randomTopic, testPush, type PushSettings } from "../api";
 
-export function PhoneCard({ hooksConnected }: { hooksConnected: boolean }) {
-  const [settings, setSettings] = useState<Settings | null>(null);
-  const [server, setServer] = useState("");
+type Props = { push: PushSettings; save: (push: PushSettings) => Promise<void>; hooksConnected: boolean };
+
+export function PhoneCard({ push: p, save, hooksConnected }: Props) {
+  const [server, setServer] = useState(p.server);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
-  useEffect(() => { getSettings().then((s) => { setSettings(s); setServer(s.push.server); }).catch((e) => setError(String(e))); }, []);
-
-  if (!settings) return null;
-  const p = settings.push;
 
   // Every change is validated and saved by the backend; on error the old settings stay.
   const update = async (patch: Partial<PushSettings>) => {
     setError(null);
     setNote(null);
-    const next = { ...settings, push: { ...p, ...patch } };
-    if (next.push.enabled && !next.push.topic) next.push.topic = randomTopic();
+    const next = { ...p, ...patch };
+    if (next.enabled && !next.topic) next.topic = randomTopic();
     try {
-      setSettings(await saveSettings(next));
+      await save(next);
     } catch (e) {
       setError(String(e));
     }

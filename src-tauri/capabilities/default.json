@@ -16,6 +16,7 @@
     "allow-get-settings",
     "allow-save-settings",
     "allow-test-push",
+    "allow-decide-permission",
     "allow-toggle-widget",
     "allow-open-session",
     "allow-send-reply",

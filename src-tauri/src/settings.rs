@@ -33,10 +33,29 @@ impl Default for PushSettings {
     }
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
+pub struct ApprovalSettings {
+    /// Off by default. When on, Claude Code's permission prompts appear here first.
+    pub enabled: bool,
+    /// How long the hook waits for an answer here before Claude Code shows its own prompt.
+    pub wait_seconds: u64,
+}
+
+impl Default for ApprovalSettings {
+    fn default() -> Self {
+        Self { enabled: false, wait_seconds: 60 }
+    }
+}
+
+/// Kept below the hook timeout registered in settings.json (see hooks::PERMISSION_HOOK_TIMEOUT).
+pub const MAX_APPROVAL_WAIT: u64 = 300;
+
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(default)]
 pub struct Settings {
     pub push: PushSettings,
+    pub approvals: ApprovalSettings,
 }
 
 pub fn validate_push(p: &PushSettings) -> Result<(), String> {
@@ -54,6 +73,9 @@ pub fn validate_push(p: &PushSettings) -> Result<(), String> {
 pub fn validate(s: &Settings) -> Result<(), String> {
     if s.push.enabled {
         validate_push(&s.push)?;
+    }
+    if !(15..=MAX_APPROVAL_WAIT).contains(&s.approvals.wait_seconds) {
+        return Err(format!("Approval wait must be between 15 and {MAX_APPROVAL_WAIT} seconds."));
     }
     Ok(())
 }
@@ -108,7 +130,10 @@ mod tests {
         assert_eq!(load(&p), s);
         fs::write(&p, r#"{"push":{"enabled":true,"topic":"x"}}"#).unwrap(); // invalid → defaults
         assert_eq!(load(&p), Settings::default());
-        assert!(save(&p, &Settings { push: push("http://x", "short") }).is_err());
+        assert!(save(&p, &Settings { push: push("http://x", "short"), ..Default::default() }).is_err());
+        let mut too_long = Settings::default();
+        too_long.approvals.wait_seconds = 3600;
+        assert!(save(&p, &too_long).is_err());
         fs::remove_dir_all(&dir).unwrap();
     }
 }

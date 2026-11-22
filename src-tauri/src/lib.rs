@@ -29,6 +29,34 @@ struct AppState {
     script_path: PathBuf,
     settings: Mutex<settings::Settings>,
     settings_path: PathBuf,
+    approvals: events::Approvals,
+    /// Where answers to permission prompts are dropped for the waiting hook script.
+    decisions_dir: PathBuf,
+}
+
+/// Answers a permission prompt that the hook is holding open. Only requests the hook actually
+/// sent (and that haven't expired) can be answered; the id is a UUID, so it's safe as a filename.
+#[tauri::command]
+fn decide_permission(state: TauriState<'_, AppState>, request_id: String, allow: bool, reason: String) -> Result<(), String> {
+    if !actions::valid_session_id(&request_id) {
+        return Err("Invalid request.".into());
+    }
+    let pending = state.approvals.lock().map_err(|e| e.to_string())?.remove(&request_id);
+    if pending.is_none_or(|a| a.expires_at <= Timestamp::now()) {
+        return Err("This request already timed out. Answer it in Claude Code.".into());
+    }
+    let reason: String = reason.chars().filter(|c| !c.is_control()).take(500).collect();
+    let decision = if allow {
+        serde_json::json!({ "behavior": "allow" })
+    } else {
+        let reason = if reason.trim().is_empty() { "Denied in AgentPulse.".to_string() } else { reason };
+        serde_json::json!({ "behavior": "deny", "message": reason })
+    };
+    std::fs::create_dir_all(&state.decisions_dir).map_err(|e| e.to_string())?;
+    // tmp + rename so the hook never reads a half-written file.
+    let tmp = state.decisions_dir.join(format!("{request_id}.tmp"));
+    std::fs::write(&tmp, decision.to_string()).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, state.decisions_dir.join(format!("{request_id}.json"))).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -140,6 +168,9 @@ async fn dashboard(app: AppHandle) -> Result<stats::Dashboard, String> {
         let live = state.live.lock().map_err(|e| e.to_string())?.clone();
         let mut d = stats::build(cache.requests(), &cache.titles(), &cache.meta(), &live, &ZonedDateTime::now());
         d.replies = state.replies.views();
+        if let Ok(ap) = state.approvals.lock() {
+            d.approvals = stats::approval_views(&ap, &cache.titles());
+        }
         if let Ok(mut s) = state.states.lock() {
             *s = d.sessions.iter().map(|v| (v.id.clone(), v.state)).collect();
         }
@@ -339,6 +370,7 @@ pub fn run() {
             get_settings,
             save_settings,
             test_push,
+            decide_permission,
             toggle_widget,
             open_session,
             send_reply,
@@ -349,6 +381,7 @@ pub fn run() {
             let home = app.path().home_dir()?;
             let data = app.path().app_local_data_dir()?;
             let live: LiveStore = Arc::new(Mutex::new(HashMap::new()));
+            let approvals: events::Approvals = Arc::new(Mutex::new(HashMap::new()));
             let script_path = data.join("hooks").join("notify.ps1");
             // Keep an installed hook script in sync with this app version.
             if script_path.exists() {
@@ -363,6 +396,8 @@ pub fn run() {
                 script_path,
                 settings: Mutex::new(settings::load(&data.join("settings.json"))),
                 settings_path: data.join("settings.json"),
+                approvals: approvals.clone(),
+                decisions_dir: data.join("decisions"),
             });
             if !std::env::args().any(|a| a == MINIMIZED_FLAG) {
                 show_main(app.handle());
@@ -391,7 +426,7 @@ pub fn run() {
                 .build(app)?;
 
             let events_file = data.join("events.jsonl");
-            events::spawn_watcher(app.handle().clone(), events_file, live, on_alert, update_tray);
+            events::spawn_watcher(app.handle().clone(), events_file, live, approvals, on_alert, update_tray);
 
             // Parse log history in the background so the first dashboard call is fast.
             let handle = app.handle().clone();

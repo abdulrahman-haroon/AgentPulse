@@ -111,6 +111,29 @@ small { font-size: 0.55em; font-weight: 500; color: var(--muted); margin-left: 2
   background: var(--warning); color: #0b0b0b;
   font-size: 12px; font-weight: 650; text-align: center;
 }
+.approvals { display: flex; flex-direction: column; gap: 12px; }
+.approval {
+  background: linear-gradient(var(--warning-soft), var(--warning-soft)), var(--card);
+  border: 1px solid color-mix(in srgb, var(--warning) 60%, transparent);
+  border-radius: var(--radius); padding: 16px 18px; display: flex; flex-direction: column; gap: 8px;
+  box-shadow: var(--shadow);
+}
+.approval-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.approval-what { font-size: 14px; }
+.tool { padding: 1px 6px; border-radius: 5px; background: var(--card-2); border: 1px solid var(--border); }
+.approval-summary, .approval-detail pre {
+  margin: 0; padding: 10px 12px; border-radius: 8px; background: var(--page); border: 1px solid var(--border-strong);
+  font-family: "Cascadia Code", Consolas, monospace; font-size: 12.5px; white-space: pre-wrap; word-break: break-all;
+  max-height: 260px; overflow: auto;
+}
+.approval-summary { font-size: 13.5px; color: var(--ink); }
+.approval-detail summary { cursor: pointer; font-size: 12.5px; color: var(--ink-2); margin-bottom: 6px; }
+.approval-actions { display: flex; gap: 8px; align-items: center; }
+.approval-actions .text { flex: 1; }
+.danger { border: 1px solid color-mix(in srgb, var(--up) 60%, transparent); background: transparent; color: var(--up); border-radius: 8px; padding: 5px 14px; font-size: 13px; font-weight: 600; }
+.danger:hover { background: color-mix(in srgb, var(--up) 12%, transparent); }
+.wait-row { align-items: center; flex-wrap: wrap; }
+.wait-row select { font: inherit; color: var(--ink); background: var(--page); border: 1px solid var(--border-strong); border-radius: 6px; padding: 2px 6px; }
 .phone { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
 .steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 10px; color: var(--ink-2); }
 .topic { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }

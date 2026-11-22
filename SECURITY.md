@@ -11,4 +11,4 @@ Include what you found, how to reproduce it, and the impact. You'll get a reply 
 
 ## Scope
 
-In scope: anything that lets AgentPulse leak log contents, run code it shouldn't, write outside its own data folder (other than the user-approved hook entries in `~/.claude/settings.json`), install an unsigned or tampered update, or be controlled by another program or website.
+In scope: anything that lets AgentPulse leak log contents, run code it shouldn't, write outside its own data folder (other than the user-approved hook entries in `~/.claude/settings.json`), install an unsigned or tampered update, approve a Claude Code permission request the user didn't approve (or approve a different request than the one shown), or be controlled by another program or website.
