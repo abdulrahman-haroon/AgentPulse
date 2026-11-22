@@ -49,7 +49,13 @@ export type Dashboard = {
   working: number;
   replies: Reply[];
 };
-export type HookStatus = { installed: string[]; missing: string[] };
+export type HookStatus = {
+  installed: string[];
+  missing: string[];
+  settings_path: string;
+  /** Present right after connect/disconnect when settings.json was backed up. */
+  backup_path: string | null;
+};
 
 /** Polls the dashboard command; skips a tick if the previous call is still running. */
 export function useDashboard(intervalMs: number) {
@@ -87,3 +93,7 @@ export const sendReply = (id: string, message: string, mode: PermissionMode) => 
 export const cancelReply = (id: string) => invoke("cancel_reply", { id });
 export const dismissReply = (id: string) => invoke("dismiss_reply", { id });
 export const hookStatus = () => invoke<HookStatus>("hook_status");
+export const connectHooks = () => invoke<HookStatus>("connect_hooks");
+export const disconnectHooks = () => invoke<HookStatus>("disconnect_hooks");
+export const getAutostart = () => invoke<boolean>("get_autostart");
+export const setAutostart = (enabled: boolean) => invoke<boolean>("set_autostart", { enabled });

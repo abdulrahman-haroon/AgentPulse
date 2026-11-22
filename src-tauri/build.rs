@@ -4,6 +4,10 @@ fn main() {
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new().commands(&[
         "dashboard",
         "hook_status",
+        "connect_hooks",
+        "disconnect_hooks",
+        "get_autostart",
+        "set_autostart",
         "toggle_widget",
         "open_session",
         "send_reply",

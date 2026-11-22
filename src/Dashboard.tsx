@@ -64,7 +64,7 @@ export default function Dashboard() {
 
         {error && <p className="callout callout-error" role="alert">Couldn't read usage: {error}</p>}
         {page === "setup" ? (
-          <SetupView status={hooks} recheck={recheck} />
+          <SetupView status={hooks} setStatus={setHooks} recheck={recheck} />
         ) : !data ? (
           <div className="loading">
             <span className="loading-bar" />

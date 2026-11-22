@@ -304,6 +304,21 @@ button:disabled { opacity: 0.5; cursor: default; filter: none; }
 .checklist .ok svg { color: var(--good); }
 .checklist .missing svg { color: var(--warning); }
 .checklist-state { font-size: 12px; color: var(--muted); }
+.pill { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.pill-ok { background: var(--good-soft); color: var(--good); }
+.pill-warn { background: var(--warning-soft); color: var(--warning); }
+@media (prefers-color-scheme: light) { .pill-warn { color: #8a5a00; } }
+.setup-actions, .confirm-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.confirm-actions { justify-content: flex-end; }
+.confirm { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border-radius: 10px; background: var(--card-2); border: 1px solid var(--border-strong); }
+.small { font-size: 12px; margin-top: 10px; }
+.switch { position: relative; display: inline-block; width: 40px; height: 22px; }
+.switch input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; z-index: 1; }
+.switch span { position: absolute; inset: 0; border-radius: 11px; background: var(--card-2); border: 1px solid var(--border-strong); transition: background 0.15s; }
+.switch span::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--muted); transition: transform 0.15s, background 0.15s; }
+.switch input:checked + span { background: var(--accent); border-color: var(--accent); }
+.switch input:checked + span::after { transform: translateX(18px); background: #fff; }
+.switch input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
 .snippet summary { cursor: pointer; font-weight: 600; }
 .snippet p { margin: 10px 0; color: var(--ink-2); }
 .snippet pre { background: var(--page); border: 1px solid var(--border); border-radius: 8px; padding: 12px; overflow-x: auto; font-size: 12px; }

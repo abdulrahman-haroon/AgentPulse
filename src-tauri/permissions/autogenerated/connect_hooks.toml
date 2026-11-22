@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-connect-hooks"
+description = "Enables the connect_hooks command without any pre-configured scope."
+commands.allow = ["connect_hooks"]
+
+[[permission]]
+identifier = "deny-connect-hooks"
+description = "Denies the connect_hooks command without any pre-configured scope."
+commands.deny = ["connect_hooks"]

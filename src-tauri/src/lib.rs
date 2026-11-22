@@ -1,5 +1,6 @@
 mod actions;
 mod events;
+mod hooks;
 mod logs;
 mod pricing;
 mod stats;
@@ -22,6 +23,8 @@ struct AppState {
     replies: actions::Replies,
     /// Session states from the latest dashboard, so actions can refuse to touch running sessions.
     states: Mutex<HashMap<String, &'static str>>,
+    /// Installed copy of the hook script that settings.json points at.
+    script_path: PathBuf,
 }
 
 /// Runs blocking work (file reads, locks the cache) off both the UI and async threads.
@@ -81,15 +84,6 @@ fn dismiss_reply(state: TauriState<'_, AppState>, id: String) {
     state.replies.dismiss(&id);
 }
 
-#[derive(serde::Serialize)]
-struct HookStatus {
-    /// Hook events in ~/.claude/settings.json that run the AgentPulse script.
-    installed: Vec<String>,
-    missing: Vec<String>,
-}
-
-const HOOK_EVENTS: [&str; 5] = ["SessionStart", "UserPromptSubmit", "Notification", "Stop", "SessionEnd"];
-
 /// Everything the UI shows, computed from logs (cached, incremental) and live hook state.
 #[tauri::command]
 async fn dashboard(app: AppHandle) -> Result<stats::Dashboard, String> {
@@ -117,16 +111,79 @@ fn refresh(state: &AppState, cache: &mut logs::LogCache) {
     }
 }
 
-/// Which AgentPulse hooks are registered in Claude Code settings (read-only check).
-#[tauri::command]
-fn hook_status(state: TauriState<'_, AppState>) -> HookStatus {
-    let settings = std::fs::read_to_string(state.claude_dir.join("settings.json")).unwrap_or_default();
-    let json: serde_json::Value = serde_json::from_str(&settings).unwrap_or_default();
-    let (installed, missing) = HOOK_EVENTS.iter().map(|e| e.to_string()).partition(|e| {
-        json["hooks"][e].to_string().contains("notify.ps1")
-    });
-    HookStatus { installed, missing }
+#[derive(serde::Serialize)]
+struct HookInfo {
+    #[serde(flatten)]
+    status: hooks::HookStatus,
+    settings_path: String,
+    /// Set after connect/disconnect when an existing settings.json was backed up.
+    backup_path: Option<String>,
 }
+
+fn hook_info(state: &AppState, backup: Option<PathBuf>) -> Result<HookInfo, String> {
+    let path = state.claude_dir.join("settings.json");
+    Ok(HookInfo {
+        status: hooks::status(&hooks::read_settings(&path)?),
+        settings_path: path.to_string_lossy().into_owned(),
+        backup_path: backup.map(|b| b.to_string_lossy().into_owned()),
+    })
+}
+
+/// Which AgentPulse hooks are registered in Claude Code's settings.json (read-only).
+#[tauri::command]
+async fn hook_status(app: AppHandle) -> Result<HookInfo, String> {
+    blocking(app, |s| hook_info(s, None)).await
+}
+
+/// Installs the hook script into AgentPulse's data folder and registers it for all five
+/// events in settings.json (backed up first). Only our own entries are touched.
+#[tauri::command]
+async fn connect_hooks(app: AppHandle) -> Result<HookInfo, String> {
+    blocking(app, |s| {
+        install_script(&s.script_path)?;
+        let path = s.claude_dir.join("settings.json");
+        let updated = hooks::connect(hooks::read_settings(&path)?, &hooks::command_for(&s.script_path))?;
+        std::fs::create_dir_all(&s.claude_dir).map_err(|e| e.to_string())?;
+        let backup = hooks::write_settings(&path, &updated)?;
+        hook_info(s, backup)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn disconnect_hooks(app: AppHandle) -> Result<HookInfo, String> {
+    blocking(app, |s| {
+        let path = s.claude_dir.join("settings.json");
+        let updated = hooks::disconnect(hooks::read_settings(&path)?)?;
+        let backup = hooks::write_settings(&path, &updated)?;
+        hook_info(s, backup)
+    })
+    .await
+}
+
+fn install_script(path: &std::path::Path) -> Result<(), String> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(path, hooks::SCRIPT).map_err(|e| format!("Couldn't install the hook script: {e}"))
+}
+
+#[tauri::command]
+fn get_autostart(app: AppHandle) -> bool {
+    use tauri_plugin_autostart::ManagerExt;
+    app.autolaunch().is_enabled().unwrap_or(false)
+}
+
+#[tauri::command]
+fn set_autostart(app: AppHandle, enabled: bool) -> Result<bool, String> {
+    use tauri_plugin_autostart::ManagerExt;
+    let a = app.autolaunch();
+    if enabled { a.enable() } else { a.disable() }.map_err(|e| e.to_string())?;
+    a.is_enabled().map_err(|e| e.to_string())
+}
+
+/// Passed by the login item so AgentPulse starts in the tray without opening a window.
+const MINIMIZED_FLAG: &str = "--minimized";
 
 #[tauri::command]
 fn toggle_widget(app: AppHandle) {
@@ -179,10 +236,20 @@ fn set_tray(tray: &TrayIcon, color: [u8; 3], tip: &str) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Must be first: a second launch just focuses the running instance.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)))
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec![MINIMIZED_FLAG]),
+        ))
         .invoke_handler(tauri::generate_handler![
             dashboard,
             hook_status,
+            connect_hooks,
+            disconnect_hooks,
+            get_autostart,
+            set_autostart,
             toggle_widget,
             open_session,
             send_reply,
@@ -191,14 +258,24 @@ pub fn run() {
         ])
         .setup(|app| {
             let home = app.path().home_dir()?;
+            let data = app.path().app_local_data_dir()?;
             let live: LiveStore = Arc::new(Mutex::new(HashMap::new()));
+            let script_path = data.join("hooks").join("notify.ps1");
+            // Keep an installed hook script in sync with this app version.
+            if script_path.exists() {
+                let _ = install_script(&script_path);
+            }
             app.manage(AppState {
                 claude_dir: logs::claude_dir(&home),
                 cache: Mutex::new(logs::LogCache::default()),
                 live: live.clone(),
                 replies: actions::Replies::default(),
                 states: Mutex::new(HashMap::new()),
+                script_path,
             });
+            if !std::env::args().any(|a| a == MINIMIZED_FLAG) {
+                show_main(app.handle());
+            }
 
             let open = MenuItem::with_id(app, "open", "Open AgentPulse", true, None::<&str>)?;
             let widget = MenuItem::with_id(app, "widget", "Toggle floating widget", true, None::<&str>)?;
@@ -222,7 +299,7 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            let events_file = app.path().app_local_data_dir()?.join("events.jsonl");
+            let events_file = data.join("events.jsonl");
             events::spawn_watcher(app.handle().clone(), events_file, live, update_tray);
 
             // Parse log history in the background so the first dashboard call is fast.
