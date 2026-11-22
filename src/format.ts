@@ -4,8 +4,8 @@ const usd0 = new Intl.NumberFormat(undefined, { style: "currency", currency: "US
 
 export const tokens = (n: number) => compact.format(n);
 export const money = (n: number) => (Math.abs(n) >= 1000 ? usd0.format(n) : usd2.format(n));
-/** Axis ticks: whole dollars once values are ≥ $10. */
-export const moneyTick = (n: number) => (Math.abs(n) >= 10 || n === 0 ? usd0.format(n) : usd2.format(n));
+/** Axis ticks share one format, chosen by the axis maximum: whole dollars once it reaches $10. */
+export const moneyTick = (n: number, axisMax: number) => (axisMax >= 10 ? usd0.format(n) : usd2.format(n));
 
 /** "45s", "12m", "2h 5m", "3d" */
 export function duration(ms: number) {

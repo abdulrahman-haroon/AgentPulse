@@ -6,6 +6,14 @@ Running Claude Code in three terminals at once? AgentPulse shows every session o
 
 > **Status:** early. Windows only for now. Per-user installer (no admin needed) with signed in-app updates from GitHub Releases.
 
+![Live board: a permission request waiting for approval, with today's cost and burn rate](docs/screenshots/live.png)
+
+| Sessions | Insights | History |
+|---|---|---|
+| ![Searchable list of past sessions](docs/screenshots/sessions.png) | ![Today's cost, burn rate and prompt-cache savings](docs/screenshots/insights.png) | ![30-day cost chart and top projects](docs/screenshots/history.png) |
+
+<sub>Screenshots use generated demo data (`scripts/demo-logs.mjs`), not real sessions.</sub>
+
 ---
 
 ## 1. What it does
@@ -79,6 +87,9 @@ Claude Code ──(writes)──► ~/.claude/projects/**/*.jsonl ──read-onl
 
 ```
 hooks/notify.ps1          Claude Code hook (works with or without the app)
+hooks/test-notify.ps1     tests for the hook's approval path (CI)
+scripts/demo-logs.mjs     generates fake Claude Code logs for demos and screenshots
+docs/screenshots/         README images (demo data only)
 src/
   Dashboard.tsx           sidebar shell and page switching
   Widget.tsx              floating widget window
@@ -138,6 +149,13 @@ powershell -File hooks/test-notify.ps1   # hook approval tests (sandboxed; also 
 # optional smoke test on your own logs (prints counts only):
 # cargo test --manifest-path src-tauri/Cargo.toml -- --ignored real_history --nocapture
 npm run tauri build  # per-user NSIS installer in src-tauri/target/release/bundle/nsis
+```
+
+**No Claude history yet, or want to take screenshots without real data?** Generate fake logs and point the app at them:
+
+```powershell
+node scripts/demo-logs.mjs $env:TEMP\agentpulse-demo
+$env:CLAUDE_CONFIG_DIR = "$env:TEMP\agentpulse-demo"; npm run tauri dev
 ```
 
 Closing a window hides it to the tray. Use the tray menu's **Quit** to exit. Launching AgentPulse again just brings the open window forward.

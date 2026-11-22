@@ -48,7 +48,7 @@ export function DailyBars({ days }: { days: DayPoint[] }) {
           {[0, 0.5, 1].map((f) => (
             <g key={f}>
               <line className="grid" x1={left} x2={width} y1={y(max * f)} y2={y(max * f)} />
-              <text className="tick" x={left - 8} y={y(max * f) + 4} textAnchor="end">{moneyTick(max * f)}</text>
+              <text className="tick" x={left - 8} y={y(max * f) + 4} textAnchor="end">{moneyTick(max * f, max)}</text>
             </g>
           ))}
           {days.map((d, i) => {
