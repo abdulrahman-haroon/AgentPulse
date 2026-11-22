@@ -13,6 +13,8 @@ Running Claude Code in three terminals at once? AgentPulse shows every session o
 | Page | What you get |
 |---|---|
 | **Live** | A card per Claude Code session across all projects and terminals: *Working*, *Needs you* (with the permission question), *Done*, or *Idle*, with its auto-generated title, project, model and cost so far. |
+| **Open** | Jump straight to a session: VS Code sessions focus their VS Code window; finished terminal sessions reopen in a new terminal with `claude --resume`. |
+| **Quick reply** | Type a follow-up on any finished session and send it without leaving AgentPulse. It runs in the background on the session's own model, streams the answer into the card, and you choose the permissions: *Ask first*, *Allow edits*, or *Plan only*. |
 | **Insights** | Today's cost vs. yesterday at the same time, burn rate ($/hour right now), money saved by prompt caching, most expensive session, average per session and per request, cost by model. |
 | **History** | 7 or 30-day cost chart, top projects, and a weekday × hour heatmap of when you actually work with Claude. |
 | **Setup** | Shows which Claude Code hooks are connected, with copy-ready config. |
@@ -20,7 +22,7 @@ Running Claude Code in three terminals at once? AgentPulse shows every session o
 | **Tray icon** | A status light: grey = quiet, green = something's working, amber = a session needs you. |
 | **Notifications** | Native popups when a task finishes or needs your approval, even when the app is closed. |
 
-Planned: Codex support, phone push via ntfy (opt-in), click-to-focus the right terminal, installer, macOS/Linux.
+Planned: Codex support, phone push via ntfy (opt-in), approve/deny permission prompts from the app, installer, macOS/Linux.
 
 ## 2. Quick start (Windows)
 
@@ -42,7 +44,7 @@ Planned: Codex support, phone push via ntfy (opt-in), click-to-focus the right t
 
 4. Start a new Claude Code session. The **Setup** page should show all five hooks as connected.
 
-Without hooks, stats and history still work, but the Live board has to guess states from log activity.
+Without hooks, everything still works, but Live states come from the logs (*Done* when Claude's last reply finished, otherwise *Working* or *Idle* by recent activity) and there are no "needs you" alerts.
 
 `-ExecutionPolicy Bypass` applies only to this one script. Read [hooks/notify.ps1](hooks/notify.ps1) first; it's about 50 lines. Each hook adds roughly a quarter of a second while PowerShell starts.
 
@@ -60,6 +62,7 @@ Claude Code ──(writes)──► ~/.claude/projects/**/*.jsonl ──read-onl
 - **Events file**: the hook writes one line per event to a local file and the app tails it. A file is used instead of a network port, so no website or other program can talk to the app.
 - **Logs**: Claude Code saves every session as JSONL. AgentPulse reads token counts and session titles from them, read-only. It parses history once, then only reads new bytes, so even large log folders stay fast.
 - **Cost** is what the tokens would cost at Anthropic API prices, including cache read and write rates. Pro/Max subscribers aren't billed per token; the number shows what the usage is worth.
+- **Quick reply** uses Claude Code's official headless mode: `claude -p --resume <session> --output-format stream-json`, with your message sent on stdin. It's only offered for sessions that are *Done* or *Idle*, so it never competes with a session that's running in an editor or terminal. VS Code shows the new messages next time you open that session.
 
 ### Project layout
 
@@ -76,6 +79,7 @@ src-tauri/src/
   logs.rs                 incremental, de-duplicating log reader
   stats.rs                turns requests + live state into the dashboard
   events.rs               tails the events file, session state, notifications
+  actions.rs              Open / Quick reply: the only code that starts processes
   pricing.rs              model prices and cost math
 src-tauri/capabilities/   exactly which commands each window may call
 ```
@@ -85,16 +89,17 @@ src-tauri/capabilities/   exactly which commands each window may call
 - **100% local.** No accounts, no telemetry, no servers.
 - **Read-only** access to Claude Code logs and settings.
 - **No open ports.** Nothing on your network or in your browser can talk to AgentPulse.
-- **Locked-down UI.** The windows can call only three app functions; no file, shell or network access. Strict Content Security Policy.
+- **Locked-down UI.** Each window can call only the app functions it needs; no file, shell or network access. Strict Content Security Policy.
+- **Launching Claude Code / VS Code safely.** The UI only sends a session ID (and your reply text). Folders come from AgentPulse's own log index, session IDs must be UUIDs, programs are found on PATH by fixed name, arguments are passed without a shell, reply text goes through stdin, and Claude Code session variables inherited from a parent session are stripped. Replies never use "bypass permissions".
 - Hook input is treated as untrusted data: it's re-serialized as JSON, cleaned of control characters, length-capped, and only ever shown as plain text.
 - Found a problem? See [SECURITY.md](SECURITY.md).
 
 ## 5. Roadmap
 
 1. ✅ Notifications via hooks
-2. ✅ Tray app: Live board, Insights, History, floating widget
+2. ✅ Tray app: Live board, Insights, History, floating widget, Open and Quick reply
 3. Installer, autostart, single-instance, one-click hook setup
-4. Codex support, ntfy phone push, click-to-focus terminal
+4. Codex support, ntfy phone push, approve/deny permission prompts from the app
 5. macOS / Linux builds
 
 ## 6. Development
@@ -104,7 +109,9 @@ Requirements: [Rust](https://rustup.rs) (stable, MSVC on Windows), Node.js 20+, 
 ```bash
 npm install          # frontend dependencies
 npm run tauri dev    # run the app with hot reload
-npm test             # Rust unit tests (log parsing, pricing, stats, events)
+npm test             # Rust unit tests (log parsing, pricing, stats, events, actions)
+# optional real end-to-end reply test (costs a few cents, use a throwaway session):
+# AGENTPULSE_TEST_SESSION=<uuid> AGENTPULSE_TEST_CWD=<its folder> cargo test --manifest-path src-tauri/Cargo.toml -- --ignored real_reply
 npm run tauri build  # build an installer into src-tauri/target/release/bundle
 ```
 

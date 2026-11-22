@@ -1,7 +1,8 @@
 //! Turns parsed requests + live hook state into everything the UI shows. Pure, so testable.
 
+use crate::actions::ReplyView;
 use crate::events::{Live, State};
-use crate::logs::Request;
+use crate::logs::{Request, SessionMeta};
 use chrono::{DateTime, Datelike, Duration, Local, Timelike};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -38,6 +39,8 @@ pub struct SessionView {
     pub cost: f64,
     pub requests: u64,
     pub model: String,
+    /// "cli", "claude-vscode", ... decides how "Open" works.
+    pub entrypoint: String,
 }
 
 #[derive(Serialize, Debug)]
@@ -58,6 +61,8 @@ pub struct Dashboard {
     pub sessions: Vec<SessionView>,
     pub needs_you: usize,
     pub working: usize,
+    /// Quick replies sent from AgentPulse (filled in by lib.rs, not computed here).
+    pub replies: Vec<ReplyView>,
 }
 
 struct Agg<'a> {
@@ -86,6 +91,7 @@ fn ranked(map: HashMap<String, NameValue>, n: usize) -> Vec<NameValue> {
 pub fn build<'a>(
     requests: impl Iterator<Item = &'a Request>,
     titles: &HashMap<&str, &str>,
+    meta: &HashMap<&str, &SessionMeta>,
     live: &HashMap<String, Live>,
     now: DateTime<Local>,
 ) -> Dashboard {
@@ -127,6 +133,7 @@ pub fn build<'a>(
         sessions: vec![],
         needs_you: 0,
         working: 0,
+        replies: vec![],
     };
     let mut models = HashMap::new();
     let mut projects = HashMap::new();
@@ -214,6 +221,8 @@ pub fn build<'a>(
                 State::NeedsYou => "needs_you",
                 _ => "done",
             },
+            // No hooks: the log says how the last reply ended.
+            None if meta.get(id).is_some_and(|m| m.last_stop.as_deref() == Some("end_turn")) => "done",
             None if now - last < Duration::minutes(2) => "working",
             None => "idle",
         };
@@ -230,6 +239,7 @@ pub fn build<'a>(
             cost: agg.map_or(0.0, |a| a.cost),
             requests: agg.map_or(0, |a| a.requests),
             model: agg.map(|a| a.model.to_string()).unwrap_or_default(),
+            entrypoint: meta.get(id).map(|m| m.entrypoint.clone()).unwrap_or_default(),
         });
     }
     let rank = |s: &str| match s {
@@ -281,7 +291,7 @@ mod tests {
             req("b", "s1", now - Duration::days(3), 5.0, 10),
             req("c", "s2", now - Duration::days(40), 9.0, 10), // outside history
         ];
-        let d = build(reqs.iter(), &HashMap::new(), &HashMap::new(), now);
+        let d = build(reqs.iter(), &HashMap::new(), &HashMap::new(), &HashMap::new(), now);
         assert_eq!(d.today_requests, 1);
         assert_eq!(d.today_cost, 2.0);
         assert_eq!(d.burn_rate_per_hour, 2.0);
@@ -298,7 +308,7 @@ mod tests {
         let mut later = req("2", "s", now - Duration::minutes(1), 3.0, 1);
         later.project = "src".into(); // Claude cd'd into a subfolder
         let reqs = [later, req("1", "s", now - Duration::minutes(9), 1.0, 1)];
-        let d = build(reqs.iter(), &HashMap::new(), &HashMap::new(), now);
+        let d = build(reqs.iter(), &HashMap::new(), &HashMap::new(), &HashMap::new(), now);
         assert_eq!(d.projects.len(), 1);
         assert_eq!((d.projects[0].name.as_str(), d.projects[0].cost), ("demo", 4.0));
         assert_eq!(d.sessions[0].project, "demo");
@@ -313,20 +323,24 @@ mod tests {
             req("3", "quiet", now - Duration::hours(1), 1.0, 1),
             req("4", "busy", now - Duration::seconds(30), 1.0, 1),
             req("5", "closed", now - Duration::minutes(1), 1.0, 1),
+            req("6", "finished", now - Duration::hours(1), 1.0, 1),
         ];
+        let finished = SessionMeta { last_stop: Some("end_turn".into()), entrypoint: "cli".into(), ..Default::default() };
+        let meta = HashMap::from([("finished", &finished)]);
         let mut l = HashMap::new();
         l.insert("waiting".to_string(), live(State::NeedsYou, now - Duration::minutes(2)));
         l.insert("answered".to_string(), live(State::NeedsYou, now - Duration::minutes(2)));
         l.insert("closed".to_string(), live(State::Ended, now));
         l.insert("fresh".to_string(), live(State::Working, now)); // hook seen, no log yet
         let titles = HashMap::from([("waiting", "Fix login bug")]);
-        let d = build(reqs.iter(), &titles, &l, now);
+        let d = build(reqs.iter(), &titles, &meta, &l, now);
 
         let state = |id: &str| d.sessions.iter().find(|s| s.id == id).map(|s| s.state);
         assert_eq!(state("waiting"), Some("needs_you"));
         assert_eq!(state("answered"), Some("working"));
         assert_eq!(state("quiet"), Some("idle"));
         assert_eq!(state("busy"), Some("working")); // inferred without hooks
+        assert_eq!(state("finished"), Some("done")); // last reply ended with end_turn
         assert_eq!(state("fresh"), Some("working"));
         assert_eq!(state("closed"), None);
         assert_eq!(d.sessions[0].title, "Fix login bug"); // needs_you sorts first

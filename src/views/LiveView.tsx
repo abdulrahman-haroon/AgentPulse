@@ -1,37 +1,11 @@
-import type { Dashboard, Session } from "../api";
-import { money, since } from "../format";
-import { StatusBadge } from "../components/StatusBadge";
-
-function timeLabel(s: Session, now: number) {
-  if (s.state_since && s.state === "working") return `running ${since(s.state_since, now)}`;
-  if (s.state_since && s.state === "needs_you") return `waiting ${since(s.state_since, now)}`;
-  return `active ${since(s.last_active, now)} ago`;
-}
-
-function SessionCard({ s, now }: { s: Session; now: number }) {
-  return (
-    <article className={`session session-${s.state}`}>
-      <header className="session-head">
-        <StatusBadge state={s.state} />
-        <span className="session-time">{timeLabel(s, now)}</span>
-      </header>
-      <h3 className="session-title" title={s.title}>{s.title}</h3>
-      <p className="session-meta">
-        <span>{s.project || "unknown project"}</span>
-        {s.model && <span>{s.model.replace(/^claude-/, "")}</span>}
-      </p>
-      {s.state === "needs_you" && s.message && <p className="session-message">{s.message}</p>}
-      <footer className="session-foot">
-        <span className="session-cost">{money(s.cost)}</span>
-        <span className="muted">{s.requests} requests</span>
-      </footer>
-    </article>
-  );
-}
+import type { Dashboard } from "../api";
+import { money } from "../format";
+import { SessionCard } from "../components/SessionCard";
 
 export function LiveView({ data, hooksMissing }: { data: Dashboard; hooksMissing: boolean }) {
   const now = Date.now();
   const delta = data.today_cost - data.yesterday_cost_by_now;
+  const replies = new Map(data.replies.map((r) => [r.session_id, r]));
   return (
     <>
       <section className="strip" aria-label="Right now">
@@ -61,8 +35,9 @@ export function LiveView({ data, hooksMissing }: { data: Dashboard; hooksMissing
 
       {hooksMissing && (
         <p className="callout">
-          Live states are guessed from log activity. Connect the hooks in <strong>Setup</strong> for exact
-          "working / needs you / done" states.
+          Without hooks, states come from the logs: <strong>Done</strong> when Claude's last reply finished,
+          otherwise <strong>Working</strong> or <strong>Idle</strong> by recent activity. Connect the hooks in
+          <strong> Setup</strong> for instant, exact states and "needs you" alerts.
         </p>
       )}
 
@@ -73,7 +48,7 @@ export function LiveView({ data, hooksMissing }: { data: Dashboard; hooksMissing
         </div>
       ) : (
         <div className="sessions">
-          {data.sessions.map((s) => <SessionCard key={s.id} s={s} now={now} />)}
+          {data.sessions.map((s) => <SessionCard key={s.id} s={s} reply={replies.get(s.id)} now={now} />)}
         </div>
       )}
     </>

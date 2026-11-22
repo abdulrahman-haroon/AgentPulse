@@ -18,7 +18,19 @@ export type Session = {
   cost: number;
   requests: number;
   model: string;
+  /** "cli", "claude-vscode", ... */
+  entrypoint: string;
 };
+export type Reply = {
+  session_id: string;
+  status: "running" | "done" | "error" | "cancelled";
+  text: string;
+  activity: string[];
+  cost_usd: number | null;
+  denied: string[];
+  error: string;
+};
+export type PermissionMode = "default" | "acceptEdits" | "plan";
 export type Dashboard = {
   today_cost: number;
   today_tokens: number;
@@ -35,6 +47,7 @@ export type Dashboard = {
   sessions: Session[];
   needs_you: number;
   working: number;
+  replies: Reply[];
 };
 export type HookStatus = { installed: string[]; missing: string[] };
 
@@ -69,4 +82,8 @@ export function useDashboard(intervalMs: number) {
 }
 
 export const toggleWidget = () => invoke("toggle_widget");
+export const openSession = (id: string) => invoke("open_session", { id });
+export const sendReply = (id: string, message: string, mode: PermissionMode) => invoke("send_reply", { id, message, mode });
+export const cancelReply = (id: string) => invoke("cancel_reply", { id });
+export const dismissReply = (id: string) => invoke("dismiss_reply", { id });
 export const hookStatus = () => invoke<HookStatus>("hook_status");

@@ -27,10 +27,25 @@ pub struct Request {
     pub cache_saved: f64,
 }
 
+/// Where a session lives and how its last reply ended.
+#[derive(Debug, Clone, Default)]
+pub struct SessionMeta {
+    /// Full folder the session started in.
+    pub cwd: String,
+    /// e.g. "cli" or "claude-vscode".
+    pub entrypoint: String,
+    /// stop_reason of the latest assistant message ("end_turn" = finished, waiting for you).
+    pub last_stop: Option<String>,
+    pub last_ts: Option<DateTime<Local>>,
+    /// Model of the latest assistant message, so replies continue on the same model.
+    pub model: Option<String>,
+}
+
 #[derive(Default)]
 pub struct FileData {
     pub requests: Vec<Request>,
     pub titles: HashMap<String, String>,
+    pub meta: HashMap<String, SessionMeta>,
     by_key: HashMap<String, usize>,
 }
 
@@ -44,6 +59,7 @@ struct LogLine {
     #[serde(rename = "sessionId")]
     session_id: Option<String>,
     cwd: Option<String>,
+    entrypoint: Option<String>,
     #[serde(rename = "aiTitle")]
     ai_title: Option<String>,
     message: Option<Message>,
@@ -53,6 +69,7 @@ struct LogLine {
 struct Message {
     id: Option<String>,
     model: Option<String>,
+    stop_reason: Option<String>,
     usage: Option<Usage>,
 }
 
@@ -105,7 +122,23 @@ impl FileData {
 
     fn ingest_assistant(&mut self, l: LogLine, session: String) {
         let Some(ts) = l.timestamp.as_deref().and_then(|t| DateTime::parse_from_rfc3339(t).ok()) else { return };
+        let ts = ts.with_timezone(&Local);
         let Some(m) = l.message else { return };
+
+        let meta = self.meta.entry(session.clone()).or_default();
+        if meta.cwd.is_empty() {
+            meta.cwd = l.cwd.clone().unwrap_or_default(); // lines are chronological: first = start folder
+        }
+        if meta.entrypoint.is_empty() {
+            meta.entrypoint = l.entrypoint.unwrap_or_default();
+        }
+        // Streaming copies of one message carry the final stop_reason only on some lines.
+        if meta.last_ts.is_none_or(|t| ts > t) || (Some(ts) == meta.last_ts && m.stop_reason.is_some()) {
+            meta.last_ts = Some(ts);
+            meta.last_stop = m.stop_reason.clone();
+            meta.model = m.model.clone();
+        }
+
         let Some(u) = m.usage else { return };
         // Older logs lack the TTL split; treat all cache writes as 5-minute.
         let (w5, w1h) = match u.cache_creation {
@@ -130,7 +163,7 @@ impl FileData {
         };
         let req = Request {
             key: key.clone(),
-            ts: ts.with_timezone(&Local),
+            ts,
             session,
             project: l.cwd.as_deref().map(project_name).unwrap_or_else(|| "unknown".into()),
             tokens: t.input + t.output + t.cache_read + t.cache_write_5m + t.cache_write_1h,
@@ -194,6 +227,18 @@ impl LogCache {
 
     pub fn titles(&self) -> HashMap<&str, &str> {
         self.files.values().flat_map(|f| f.data.titles.iter().map(|(k, v)| (k.as_str(), v.as_str()))).collect()
+    }
+
+    /// Per-session metadata; when a session spans files (resumed), the most recent one wins.
+    pub fn meta(&self) -> HashMap<&str, &SessionMeta> {
+        let mut out: HashMap<&str, &SessionMeta> = HashMap::new();
+        for (id, m) in self.files.values().flat_map(|f| f.data.meta.iter()) {
+            let slot = out.entry(id.as_str()).or_insert(m);
+            if m.last_ts > slot.last_ts {
+                *slot = m;
+            }
+        }
+        out
     }
 }
 
@@ -286,6 +331,20 @@ pub mod tests {
         // 1M * $4 * 1.25 + 1M * $4 * 2 = $13
         assert!((d.requests[0].cost.unwrap() - 13.0).abs() < 1e-9);
         assert_eq!(d.requests[0].session, "f"); // fallback to file stem
+    }
+
+    #[test]
+    fn records_session_meta_from_first_and_latest_lines() {
+        let mut d = FileData::default();
+        let first = r#"{"type":"assistant","timestamp":"2026-06-15T12:00:00Z","sessionId":"s1","cwd":"C:\\code\\demo","entrypoint":"cli","message":{"id":"a","stop_reason":"tool_use","usage":{}}}"#;
+        let later = r#"{"type":"assistant","timestamp":"2026-06-15T12:05:00Z","sessionId":"s1","cwd":"C:\\code\\demo\\src","entrypoint":"cli","message":{"id":"b","model":"claude-haiku-5-5","stop_reason":"end_turn","usage":{}}}"#;
+        d.ingest(first, "f");
+        d.ingest(later, "f");
+        let m = &d.meta["s1"];
+        assert_eq!(m.cwd, r"C:\code\demo"); // start folder, not the later subfolder
+        assert_eq!(m.entrypoint, "cli");
+        assert_eq!(m.last_stop.as_deref(), Some("end_turn"));
+        assert_eq!(m.model.as_deref(), Some("claude-haiku-5-5"));
     }
 
     #[test]

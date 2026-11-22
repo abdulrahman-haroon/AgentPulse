@@ -17,7 +17,10 @@ type PageId = (typeof PAGES)[number]["id"];
 
 export default function Dashboard() {
   const [page, setPage] = useState<PageId>("live");
-  const { data, error, updatedAt } = useDashboard(4000);
+  const [fast, setFast] = useState(false);
+  const { data, error, updatedAt } = useDashboard(fast ? 1500 : 4000);
+  // Poll faster while a quick reply is streaming in.
+  useEffect(() => setFast(!!data?.replies.some((r) => r.status === "running")), [data]);
   const [hooks, setHooks] = useState<HookStatus | null>(null);
   const recheck = useCallback(() => { hookStatus().then(setHooks).catch(() => {}); }, []);
   useEffect(recheck, [recheck]);
