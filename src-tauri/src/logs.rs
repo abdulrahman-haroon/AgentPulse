@@ -39,7 +39,11 @@ pub struct SessionMeta {
     pub last_ts: Option<Timestamp>,
     /// Model of the latest assistant message, so replies continue on the same model.
     pub model: Option<String>,
+    /// The user's most recent prompt (Claude Code's `last-prompt` record), capped. For search.
+    pub last_prompt: String,
 }
+
+const MAX_PROMPT_CHARS: usize = 300;
 
 #[derive(Default)]
 pub struct FileData {
@@ -62,6 +66,8 @@ struct LogLine {
     entrypoint: Option<String>,
     #[serde(rename = "aiTitle")]
     ai_title: Option<String>,
+    #[serde(rename = "lastPrompt")]
+    last_prompt: Option<String>,
     message: Option<Message>,
 }
 
@@ -103,8 +109,8 @@ pub fn project_name(cwd: &str) -> String {
 impl FileData {
     /// Adds one log line. `fallback_session` is the file stem, used when a line has no sessionId.
     pub fn ingest(&mut self, line: &str, fallback_session: &str) {
-        // Cheap skip: most lines are large records with neither usage nor a title.
-        if !line.contains("\"usage\"") && !line.contains("\"ai-title\"") {
+        // Cheap skip: most lines are large records with no usage, title or prompt summary.
+        if !line.contains("\"usage\"") && !line.contains("\"ai-title\"") && !line.contains("\"last-prompt\"") {
             return;
         }
         let Ok(l) = serde_json::from_str::<LogLine>(line) else { return };
@@ -113,6 +119,13 @@ impl FileData {
             Some("ai-title") => {
                 if let Some(t) = l.ai_title {
                     self.titles.insert(session, t);
+                }
+            }
+            Some("last-prompt") => {
+                if let Some(p) = l.last_prompt {
+                    // One line, control chars dropped, capped: it's a preview, not a transcript.
+                    let flat: String = p.split_whitespace().collect::<Vec<_>>().join(" ");
+                    self.meta.entry(session).or_default().last_prompt = flat.chars().take(MAX_PROMPT_CHARS).collect();
                 }
             }
             Some("assistant") => self.ingest_assistant(l, session),
@@ -233,6 +246,7 @@ impl LogCache {
         let mut out: HashMap<&str, &SessionMeta> = HashMap::new();
         for (id, m) in self.files.values().flat_map(|f| f.data.meta.iter()) {
             let slot = out.entry(id.as_str()).or_insert(m);
+            // Prefer the copy with the latest activity; a prompt-only copy never wins over a real one.
             if m.last_ts > slot.last_ts {
                 *slot = m;
             }
@@ -344,6 +358,16 @@ pub mod tests {
         assert_eq!(m.entrypoint, "cli");
         assert_eq!(m.last_stop.as_deref(), Some("end_turn"));
         assert_eq!(m.model.as_deref(), Some("claude-haiku-5-5"));
+    }
+
+    #[test]
+    fn keeps_last_prompt_as_a_short_single_line() {
+        let mut d = FileData::default();
+        let long = format!("fix the\nlogin   bug {}", "x".repeat(500));
+        d.ingest(&serde_json::json!({"type":"last-prompt","lastPrompt":long,"sessionId":"s1"}).to_string(), "f");
+        let p = &d.meta["s1"].last_prompt;
+        assert!(p.starts_with("fix the login bug x"));
+        assert_eq!(p.chars().count(), MAX_PROMPT_CHARS);
     }
 
     #[test]

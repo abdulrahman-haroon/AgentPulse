@@ -179,6 +179,17 @@ async fn dashboard(app: AppHandle) -> Result<stats::Dashboard, String> {
     .await
 }
 
+/// Every session from the last 30 days, for the session browser (fetched on demand, not polled).
+#[tauri::command]
+async fn session_history(app: AppHandle) -> Result<Vec<stats::SessionRow>, String> {
+    blocking(app, |state| {
+        let mut cache = state.cache.lock().map_err(|e| e.to_string())?;
+        refresh(state, &mut cache);
+        Ok(stats::history(cache.requests(), &cache.titles(), &cache.meta(), &ZonedDateTime::now()))
+    })
+    .await
+}
+
 fn refresh(state: &AppState, cache: &mut logs::LogCache) {
     // One spare day so files touched just before the window's first midnight are included.
     let since = SystemTime::now() - std::time::Duration::from_secs((stats::HISTORY_DAYS as u64 + 1) * 86_400);
@@ -371,6 +382,7 @@ pub fn run() {
             save_settings,
             test_push,
             decide_permission,
+            session_history,
             toggle_widget,
             open_session,
             send_reply,

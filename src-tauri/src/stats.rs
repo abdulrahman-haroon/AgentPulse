@@ -128,15 +128,8 @@ fn ranked(map: HashMap<String, NameValue>, n: usize) -> Vec<NameValue> {
     v
 }
 
-pub fn build<'a>(
-    requests: impl Iterator<Item = &'a Request>,
-    titles: &HashMap<&str, &str>,
-    meta: &HashMap<&str, &SessionMeta>,
-    live: &HashMap<String, Live>,
-    // In the user's time zone: decides what "today", weekdays and hours mean.
-    now: &ZonedDateTime,
-) -> Dashboard {
-    // The same request can appear in several files (resumed sessions): dedupe globally.
+/// The same request can appear in several files (resumed sessions): keep one copy, the most complete.
+fn dedupe<'a>(requests: impl Iterator<Item = &'a Request>) -> Vec<&'a Request> {
     let mut unique: HashMap<&str, &Request> = HashMap::new();
     let mut all: Vec<&Request> = Vec::new();
     for r in requests {
@@ -151,6 +144,90 @@ pub fn build<'a>(
         }
     }
     all.extend(unique.into_values());
+    all
+}
+
+/// One row of the session browser.
+#[derive(Serialize, Debug)]
+pub struct SessionRow {
+    pub id: String,
+    pub title: String,
+    pub project: String,
+    pub started: String,
+    pub last_active: String,
+    pub active_secs: i64,
+    pub requests: u64,
+    pub cost: f64,
+    pub tokens: u64,
+    pub model: String,
+    pub entrypoint: String,
+    pub last_prompt: String,
+}
+
+/// Every session with activity in the history window, newest first.
+pub fn history<'a>(
+    requests: impl Iterator<Item = &'a Request>,
+    titles: &HashMap<&str, &str>,
+    meta: &HashMap<&str, &SessionMeta>,
+    now: &ZonedDateTime,
+) -> Vec<SessionRow> {
+    let cutoff = now.timestamp() - SignedDuration::from_hours(24 * HISTORY_DAYS);
+    let mut by_session: HashMap<&str, Agg> = HashMap::new();
+    for r in dedupe(requests).into_iter().filter(|r| r.ts >= cutoff) {
+        let s = by_session.entry(&r.session).or_insert(Agg {
+            first: r.ts,
+            last: r.ts,
+            cost: 0.0,
+            tokens: 0,
+            requests: 0,
+            project: &r.project,
+            model: &r.model,
+        });
+        if r.ts < s.first {
+            s.first = r.ts;
+            s.project = &r.project;
+        }
+        if r.ts >= s.last {
+            s.last = r.ts;
+            s.model = &r.model;
+        }
+        s.cost += r.cost.unwrap_or(0.0);
+        s.tokens += r.tokens;
+        s.requests += 1;
+    }
+    let mut rows: Vec<SessionRow> = by_session
+        .into_iter()
+        .map(|(id, a)| {
+            let m = meta.get(id);
+            SessionRow {
+                id: id.to_string(),
+                title: titles.get(id).map(|t| t.to_string()).unwrap_or_else(|| "Untitled session".into()),
+                project: a.project.to_string(),
+                started: a.first.to_string(),
+                last_active: a.last.to_string(),
+                active_secs: a.last.duration_since(a.first).as_secs(),
+                requests: a.requests,
+                cost: a.cost,
+                tokens: a.tokens,
+                model: a.model.to_string(),
+                entrypoint: m.map(|m| m.entrypoint.clone()).unwrap_or_default(),
+                last_prompt: m.map(|m| m.last_prompt.clone()).unwrap_or_default(),
+            }
+        })
+        .collect();
+    rows.sort_by(|a, b| b.last_active.cmp(&a.last_active));
+    rows
+}
+
+pub fn build<'a>(
+    requests: impl Iterator<Item = &'a Request>,
+    titles: &HashMap<&str, &str>,
+    meta: &HashMap<&str, &SessionMeta>,
+    live: &HashMap<String, Live>,
+    // In the user's time zone: decides what "today", weekdays and hours mean.
+    now: &ZonedDateTime,
+) -> Dashboard {
+    let all = dedupe(requests);
 
     let tz = now.time_zone().clone();
     let now_ts = now.timestamp();
@@ -349,6 +426,44 @@ mod tests {
         assert_eq!(d.daily.last().unwrap().cost, 2.0);
         assert_eq!(d.projects[0].cost, 7.0);
         assert_eq!(d.heatmap.iter().flatten().sum::<u32>(), 2);
+    }
+
+    /// Opt-in smoke test on the developer's own logs; prints counts only, never content.
+    /// cargo test -- --ignored real_history
+    #[test]
+    #[ignore]
+    fn real_history() {
+        let home = std::path::PathBuf::from(std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")).unwrap());
+        let mut cache = crate::logs::LogCache::default();
+        let since = std::time::SystemTime::now() - std::time::Duration::from_secs(31 * 86_400);
+        let t = std::time::Instant::now();
+        cache.refresh(&crate::logs::claude_dir(&home).join("projects"), since);
+        let rows = history(cache.requests(), &cache.titles(), &cache.meta(), &ZonedDateTime::now());
+        let with_prompt = rows.iter().filter(|r| !r.last_prompt.is_empty()).count();
+        let titled = rows.iter().filter(|r| r.title != "Untitled session").count();
+        println!("sessions={} titled={titled} with_last_prompt={with_prompt} total_cost={:.2} took={:?}", rows.len(), rows.iter().map(|r| r.cost).sum::<f64>(), t.elapsed());
+        assert!(rows.windows(2).all(|w| w[0].last_active >= w[1].last_active), "newest first");
+    }
+
+    #[test]
+    fn history_lists_sessions_newest_first_with_prompt() {
+        let now = noon();
+        let reqs = [
+            req("1", "old", ago(&now, 5 * 86_400), 2.0, 1),
+            req("2", "old", ago(&now, 5 * 86_400 - 600), 3.0, 1),
+            req("3", "new", ago(&now, 60), 1.0, 1),
+            req("3", "new", ago(&now, 60), 1.0, 1), // duplicate copy
+            req("4", "ancient", ago(&now, 40 * 86_400), 9.0, 1), // outside window
+        ];
+        let m = SessionMeta { last_prompt: "fix the login bug".into(), entrypoint: "cli".into(), ..Default::default() };
+        let meta = HashMap::from([("old", &m)]);
+        let titles = HashMap::from([("old", "Login fix")]);
+        let rows = history(reqs.iter(), &titles, &meta, &now);
+        assert_eq!(rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), ["new", "old"]);
+        let old = &rows[1];
+        assert_eq!((old.title.as_str(), old.cost, old.requests, old.active_secs), ("Login fix", 5.0, 2, 600));
+        assert_eq!((old.last_prompt.as_str(), old.entrypoint.as_str()), ("fix the login bug", "cli"));
+        assert_eq!(rows[0].requests, 1);
     }
 
     #[test]

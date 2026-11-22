@@ -16,6 +16,7 @@ Running Claude Code in three terminals at once? AgentPulse shows every session o
 | **Open** | Jump straight to a session: VS Code sessions focus their VS Code window; finished terminal sessions reopen in a new terminal with `claude --resume`. |
 | **Approve in AgentPulse** | Optional. When Claude Code asks permission to run a command or edit a file, the request appears at the top of the Live board with the **full command**, a countdown, and **Allow once** / **Deny** (with a reason Claude sees). No answer in time, or AgentPulse not running, and Claude Code shows its normal prompt. Nothing is ever auto-approved. |
 | **Quick reply** | Type a follow-up on any finished session and send it without leaving AgentPulse. It runs in the background on the session's own model, streams the answer into the card, and you choose the permissions: *Ask first*, *Allow edits*, or *Plan only*. |
+| **Sessions** | Every Claude Code session from the last 30 days in one searchable list: search titles, projects and **what you last asked**, filter by project, sort by recent or most expensive, then open or resume it. |
 | **Insights** | Today's cost vs. yesterday at the same time, burn rate ($/hour right now), money saved by prompt caching, most expensive session, average per session and per request, cost by model. |
 | **History** | 7 or 30-day cost chart, top projects, and a weekday × hour heatmap of when you actually work with Claude. |
 | **Setup** | One-click **Connect hooks** (backs up your settings first, touches only AgentPulse's own entries), Disconnect, **Start with Windows**, and **Updates** (check, then install and restart). |
@@ -81,7 +82,7 @@ hooks/notify.ps1          Claude Code hook (works with or without the app)
 src/
   Dashboard.tsx           sidebar shell and page switching
   Widget.tsx              floating widget window
-  views/                  Live, Insights, History, Setup pages
+  views/                  Live, Sessions, Insights, History, Setup pages
   components/             charts (SVG), status badges, icons
   api.ts, format.ts       typed bridge to Rust, number/time formatting
 src-tauri/src/
@@ -119,8 +120,9 @@ src-tauri/capabilities/   exactly which commands each window may call
 4. ✅ Signed releases with in-app updates
 5. ✅ Phone notifications (ntfy)
 6. ✅ Approve or deny Claude Code permission prompts from the app
-7. Codex support
-8. macOS / Linux builds
+7. ✅ Session browser with search
+8. Codex support
+9. macOS / Linux builds
 
 ## 6. Development
 
@@ -132,6 +134,8 @@ npm run tauri dev    # run the app with hot reload
 npm test             # Rust unit tests (log parsing, pricing, stats, events, actions)
 # optional real end-to-end reply test (costs a few cents, use a throwaway session):
 # AGENTPULSE_TEST_SESSION=<uuid> AGENTPULSE_TEST_CWD=<its folder> cargo test --manifest-path src-tauri/Cargo.toml -- --ignored real_reply
+# optional smoke test on your own logs (prints counts only):
+# cargo test --manifest-path src-tauri/Cargo.toml -- --ignored real_history --nocapture
 npm run tauri build  # per-user NSIS installer in src-tauri/target/release/bundle/nsis
 ```
 

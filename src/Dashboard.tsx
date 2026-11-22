@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { autoCheckEnabled, checkUpdate, hookStatus, toggleWidget, useDashboard, type HookStatus, type UpdateInfo } from "./api";
 import { since } from "./format";
-import { ChartIcon, PinIcon, PlugIcon, PulseIcon, SparkIcon } from "./components/Icons";
+import { ChartIcon, ListIcon, PinIcon, PlugIcon, PulseIcon, SparkIcon } from "./components/Icons";
+import { SessionsView } from "./views/SessionsView";
 import { LiveView } from "./views/LiveView";
 import { InsightsView } from "./views/InsightsView";
 import { HistoryView } from "./views/HistoryView";
@@ -9,6 +10,7 @@ import { SetupView } from "./views/SetupView";
 
 const PAGES = [
   { id: "live", label: "Live", icon: <PulseIcon />, subtitle: "Every Claude Code session, right now" },
+  { id: "sessions", label: "Sessions", icon: <ListIcon />, subtitle: "Find any conversation from the last 30 days" },
   { id: "insights", label: "Insights", icon: <SparkIcon />, subtitle: "What today is costing, and where it goes" },
   { id: "history", label: "History", icon: <ChartIcon />, subtitle: "Trends, projects and your working hours" },
   { id: "setup", label: "Setup", icon: <PlugIcon />, subtitle: "Hooks, startup, updates and privacy" },
@@ -74,6 +76,8 @@ export default function Dashboard() {
         {error && <p className="callout callout-error" role="alert">Couldn't read usage: {error}</p>}
         {page === "setup" ? (
           <SetupView status={hooks} setStatus={setHooks} recheck={recheck} update={update} />
+        ) : page === "sessions" ? (
+          <SessionsView />
         ) : !data ? (
           <div className="loading">
             <span className="loading-bar" />

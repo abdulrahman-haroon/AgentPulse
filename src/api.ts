@@ -59,6 +59,23 @@ export type Dashboard = {
   replies: Reply[];
   approvals: Approval[];
 };
+// Mirrors stats::SessionRow.
+export type SessionRow = {
+  id: string;
+  title: string;
+  project: string;
+  started: string;
+  last_active: string;
+  active_secs: number;
+  requests: number;
+  cost: number;
+  tokens: number;
+  model: string;
+  entrypoint: string;
+  last_prompt: string;
+};
+export const sessionHistory = () => invoke<SessionRow[]>("session_history");
+
 export type HookStatus = {
   installed: string[];
   missing: string[];

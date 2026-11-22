@@ -9,6 +9,8 @@ const svg = (size: number, children: React.ReactNode) => (
 export const PulseIcon = ({ size = 18 }: P) => svg(size, <path d="M3 12h4l2.5-6 5 12 2.5-6h4" />);
 export const SparkIcon = ({ size = 18 }: P) => svg(size, <path d="M12 3l1.9 5.6L19.5 10l-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.4z" />);
 export const ChartIcon = ({ size = 18 }: P) => svg(size, <><path d="M4 20V10" /><path d="M10 20V4" /><path d="M16 20v-7" /><path d="M22 20H2" /></>);
+export const ListIcon = ({ size = 18 }: P) => svg(size, <><path d="M9 6h11" /><path d="M9 12h11" /><path d="M9 18h11" /><circle cx="4.5" cy="6" r="1" /><circle cx="4.5" cy="12" r="1" /><circle cx="4.5" cy="18" r="1" /></>);
+export const SearchIcon = ({ size = 16 }: P) => svg(size, <><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></>);
 export const PlugIcon = ({ size = 18 }: P) => svg(size, <><path d="M9 7V3" /><path d="M15 7V3" /><path d="M6 7h12v4a6 6 0 0 1-12 0z" /><path d="M12 17v4" /></>);
 export const PinIcon = ({ size = 18 }: P) => svg(size, <><rect x="3" y="5" width="18" height="12" rx="3" /><path d="M8 21h8" /></>);
 export const CloseIcon = ({ size = 14 }: P) => svg(size, <><path d="M6 6l12 12" /><path d="M18 6L6 18" /></>);
