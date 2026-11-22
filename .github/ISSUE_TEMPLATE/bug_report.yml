@@ -1,0 +1,40 @@
+name: Bug report
+description: Something in AgentPulse doesn't work as expected.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! **Please don't paste Claude Code logs, prompts, or screenshots with your code or project names.**
+        Session logs contain your conversations. Describe what happened instead; we'll ask for specifics if needed.
+        Security problem? Use **Report a security vulnerability** instead of a public issue.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: AgentPulse version
+      description: Setup → Updates shows it.
+      placeholder: "0.2.0"
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: "Windows 11 24H2"
+  - type: dropdown
+    id: hooks
+    attributes:
+      label: Are the Claude Code hooks connected? (Setup page)
+      options: ["Yes, all", "Partly", "No", "Not sure"]
+  - type: input
+    id: claude
+    attributes:
+      label: Claude Code version
+      description: Output of `claude --version`

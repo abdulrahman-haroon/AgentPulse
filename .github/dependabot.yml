@@ -1,0 +1,28 @@
+# Weekly dependency updates as pull requests (CI runs on each). Security fixes come
+# immediately regardless of this schedule. Grouped to keep the PR count low.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      npm:
+        patterns: ["*"]
+
+  - package-ecosystem: cargo
+    directory: /src-tauri
+    schedule:
+      interval: weekly
+    groups:
+      cargo:
+        patterns: ["*"]
+
+  # Keeps the SHA-pinned actions in .github/workflows current (it updates the SHA and the tag comment).
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
