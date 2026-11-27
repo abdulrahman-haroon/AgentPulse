@@ -6,19 +6,20 @@ use std::f32::consts::PI;
 
 const RATE: u32 = 44_100;
 
-/// Peak level, well below full scale: an alert should be noticed, not startle.
-const LEVEL: f32 = 0.22;
-/// Fade-in per note. Anything much shorter is heard as a click.
-const ATTACK: f32 = 0.03;
+/// Peak level, far below full scale: an alert should be noticed, never startle. (v1 was 0.45, v2
+/// 0.22; the maintainer still found v2 too loud.)
+const LEVEL: f32 = 0.12;
+/// Fade-in per note: slow enough that the tone swells in rather than strikes.
+const ATTACK: f32 = 0.06;
 
-/// (frequency Hz, start seconds) per note. Two notes each, mid register (where the ear is less
-/// sensitive than at 1-2 kHz), told apart by direction rather than loudness.
+/// (frequency Hz, start seconds) per note. Two notes each in a low-mid register (soft, yet still
+/// audible on laptop speakers), told apart by direction rather than loudness.
 fn notes(kind: AlertKind) -> &'static [(f32, f32)] {
     match kind {
-        // E5 → C5, falling: settled, "all done".
-        AlertKind::Done => &[(659.25, 0.0), (523.25, 0.2)],
-        // C5 → G5, rising: a gentle "hey, your turn".
-        AlertKind::NeedsYou => &[(523.25, 0.0), (783.99, 0.18)],
+        // C5 → A4, falling: settled, "all done".
+        AlertKind::Done => &[(523.25, 0.0), (440.0, 0.26)],
+        // A4 → D5, rising: a gentle "your turn".
+        AlertKind::NeedsYou => &[(440.0, 0.0), (587.33, 0.24)],
     }
 }
 
@@ -32,10 +33,10 @@ pub fn wav(kind: AlertKind) -> Vec<u8> {
         for (i, s) in pcm.iter_mut().enumerate().skip(from) {
             let t = (i - from) as f32 / RATE as f32;
             let rise = (t / ATTACK).min(1.0);
-            let envelope = rise * rise * (3.0 - 2.0 * rise) * (-t * 4.0).exp(); // smooth fade-in, long gentle ring
+            let envelope = rise * rise * (3.0 - 2.0 * rise) * (-t * 3.5).exp(); // swell in, long gentle ring
             let w = 2.0 * PI * freq * t;
-            // Overtones fade fast: a touch of brightness at the start, then a pure, warm tone.
-            *s += envelope * (w.sin() + 0.12 * (-t * 14.0).exp() * (2.0 * w).sin() + 0.04 * (-t * 22.0).exp() * (3.0 * w).sin());
+            // Almost a pure tone: just a hint of an overtone that fades within the first moment.
+            *s += envelope * (w.sin() + 0.05 * (-t * 18.0).exp() * (2.0 * w).sin());
         }
     }
     // Fade the last 80 ms to silence so the end never clicks.
@@ -109,8 +110,8 @@ mod tests {
             assert_eq!(u32::from_le_bytes(w[4..8].try_into().unwrap()) as usize, w.len() - 8);
             let s: Vec<u16> = w[44..].chunks(2).map(|c| i16::from_le_bytes([c[0], c[1]]).unsigned_abs()).collect();
             let peak = *s.iter().max().unwrap();
-            // about a fifth of full scale: present, never startling
-            assert!((6_000..8_000).contains(&peak), "{peak}");
+            // soft: well below full scale (the maintainer found 0.45 and 0.22 too loud)
+            assert!((3_500..4_500).contains(&peak), "{peak}"); // about an eighth of full scale
             // soft start: the first 5 ms stay well under the peak (no click)
             assert!(s[..RATE as usize / 200].iter().all(|v| *v < peak / 10), "attack too sharp");
             // and it ends in silence

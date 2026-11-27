@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "widget",
-  "description": "Floating widget: read the dashboard, answer approvals, open the dashboard or a session's project in VS Code, mute alert sounds, hide itself, be dragged and fit its content.",
+  "description": "Floating widget: read the dashboard, answer approvals, open the dashboard or a session's project in VS Code, mute alert sounds, mark finished sessions as checked, hide itself, be dragged and fit its content.",
   "windows": ["widget"],
   "permissions": [
     "allow-dashboard",
@@ -9,6 +9,7 @@
     "allow-open-dashboard",
     "allow-focus-session",
     "allow-set-sound",
+    "allow-mark-all-checked",
     "allow-decide-permission",
     "core:window:allow-start-dragging",
     "core:window:allow-set-size"

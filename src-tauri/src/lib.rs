@@ -13,7 +13,7 @@ mod stats;
 use events::{AlertKind, LiveStore, State};
 use jiff::{SignedDuration, Timestamp, ZonedDateTime};
 use logs::Provider;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
@@ -40,6 +40,23 @@ struct AppState {
     decisions_dir: PathBuf,
     /// Exists while the floating widget is on, so it comes back after a restart.
     widget_flag: PathBuf,
+    /// Sessions that finished and the user hasn't checked yet: the tray's badge dot.
+    unchecked: Mutex<HashSet<String>>,
+}
+
+/// The user looked at this session (opened it from AgentPulse).
+fn mark_checked(state: &AppState, id: &str) {
+    if let Ok(mut u) = state.unchecked.lock() {
+        u.remove(id);
+    }
+}
+
+/// Widget's "N new" pill: everything counts as checked.
+#[tauri::command]
+fn mark_all_checked(state: TauriState<'_, AppState>) {
+    if let Ok(mut u) = state.unchecked.lock() {
+        u.clear();
+    }
 }
 
 /// Answers a permission prompt that the hook is holding open. Only requests the hook actually
@@ -71,6 +88,7 @@ async fn test_push(push: settings::PushSettings) -> Result<(), String> {
         project: "AgentPulse".into(),
         title: "AgentPulse test".into(),
         body: "Phone notifications are working.".into(),
+        session: String::new(),
     };
     let mut body = push::payload(&push, &sample);
     body["title"] = "AgentPulse test".into();
@@ -100,6 +118,13 @@ fn test_sound(kind: String) {
 fn on_alert(app: &AppHandle, alert: &events::Alert) {
     use tauri_plugin_notification::NotificationExt;
     let _ = app.notification().builder().title(&alert.title).body(&alert.body).show();
+    // Already looking at the dashboard? Then it's seen, no badge.
+    let looking = app.get_webview_window("main").is_some_and(|w| w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false));
+    if alert.kind == AlertKind::Done && !alert.session.is_empty() && !looking {
+        if let Ok(mut u) = app.state::<AppState>().unchecked.lock() {
+            u.insert(alert.session.clone());
+        }
+    }
     let s = app.state::<AppState>().settings.lock().map(|s| s.clone()).unwrap_or_default();
     if s.sound.wanted(alert.kind) {
         sound::play(alert.kind);
@@ -146,6 +171,7 @@ fn session_info(state: &AppState, id: &str) -> Result<(logs::SessionMeta, bool),
 async fn open_session(app: AppHandle, id: String) -> Result<(), String> {
     blocking(app, move |s| {
         let (m, running) = session_info(s, &id)?;
+        mark_checked(s, &id);
         actions::open_session(&id, &m.cwd, &m.entrypoint, running)
     })
     .await
@@ -157,6 +183,7 @@ async fn open_session(app: AppHandle, id: String) -> Result<(), String> {
 async fn focus_session(app: AppHandle, id: String) -> Result<(), String> {
     blocking(app, move |s| {
         let cwd = s.cache.lock().map_err(|e| e.to_string())?.meta().get(id.as_str()).map(|m| m.cwd.clone()).ok_or("Unknown session.")?;
+        mark_checked(s, &id);
         actions::open_in_vscode(&id, &cwd)
     })
     .await
@@ -196,6 +223,7 @@ async fn dashboard(app: AppHandle) -> Result<stats::Dashboard, String> {
         let mut d = stats::build(cache.requests(), &cache.titles(), &cache.meta(), &cache.agents(), &live, &now);
         d.limits = cache.limits(now.timestamp());
         d.sound_enabled = state.settings.lock().map(|s| s.sound.enabled).unwrap_or(true);
+        d.unchecked = state.unchecked.lock().map(|u| u.iter().cloned().collect()).unwrap_or_default();
         d.replies = state.replies.views();
         if let Ok(ap) = state.approvals.lock() {
             d.approvals = stats::approval_views(&ap, &cache.titles());
@@ -384,10 +412,13 @@ fn seg_dist(px: f32, py: f32, a: (f32, f32), b: (f32, f32)) -> f32 {
 }
 
 /// 32×32 tray icon: the AgentPulse mark (pulse line on a dark rounded square) with the line in the
-/// status color. Drawn here, so no image files or decoders are needed.
-fn tray_icon(line: [u8; 3]) -> Image<'static> {
+/// status color, plus a green "not checked yet" dot cut into the top-right corner. Drawn here, so
+/// no image files or decoders are needed.
+fn tray_icon(line: [u8; 3], badge: bool) -> Image<'static> {
     const N: usize = 32;
     const BG: [u8; 3] = [0x15, 0x18, 0x2b];
+    const DOT: [u8; 3] = [0x34, 0xd3, 0x99];
+    const DOT_AT: (f32, f32) = (25.5, 6.5);
     // The logo's pulse, in tray pixels (same shape as icons/icon-source.svg).
     const PTS: [(f32, f32); 6] = [(5.5, 17.5), (11.0, 17.5), (13.5, 9.0), (18.5, 24.0), (21.0, 17.5), (26.5, 17.5)];
     let mut px = Vec::with_capacity(N * N * 4);
@@ -397,11 +428,17 @@ fn tray_icon(line: [u8; 3]) -> Image<'static> {
             // Rounded square, corner radius 8, 1px anti-aliased edge.
             let (qx, qy) = ((cx - 16.0).abs() - 8.0, (cy - 16.0).abs() - 8.0);
             let edge = qx.max(0.0).hypot(qy.max(0.0)) + qx.max(qy).min(0.0) - 8.0;
-            let fill = (0.5 - edge).clamp(0.0, 1.0);
             let dist = PTS.windows(2).map(|w| seg_dist(cx, cy, w[0], w[1])).fold(f32::MAX, f32::min);
             let ink = (2.25 - dist).clamp(0.0, 1.0); // ~3.5px stroke
-            let c = |i: usize| (BG[i] as f32 * (1.0 - ink) + line[i] as f32 * ink) as u8;
-            px.extend_from_slice(&[c(0), c(1), c(2), (fill * 255.0) as u8]);
+            // Badge: a 5px-radius dot with a 2px transparent gap around it, like a phone badge.
+            let d = (cx - DOT_AT.0).hypot(cy - DOT_AT.1);
+            let (dot, gap) = if badge { ((5.5 - d).clamp(0.0, 1.0), (7.5 - d).clamp(0.0, 1.0)) } else { (0.0, 0.0) };
+            let tile = (0.5 - edge).clamp(0.0, 1.0) * (1.0 - gap);
+            let c = |i: usize| {
+                let base = BG[i] as f32 * (1.0 - ink) + line[i] as f32 * ink;
+                (base * (1.0 - dot) + DOT[i] as f32 * dot) as u8
+            };
+            px.extend_from_slice(&[c(0), c(1), c(2), (tile.max(dot) * 255.0) as u8]);
         }
     }
     Image::new_owned(px, N as u32, N as u32)
@@ -411,8 +448,57 @@ const QUIET: [u8; 3] = [0x8b, 0x93, 0xa7];
 const WORKING: [u8; 3] = [0x38, 0xbd, 0xf8];
 const NEEDS_YOU: [u8; 3] = [0xfb, 0xbf, 0x24];
 
-/// Tray color + tooltip from hook states, log-only agents and running sub-agents.
-fn tray_status(live: &HashMap<String, events::Live>, logs: &HashMap<String, stats::LogState>, agent_sessions: &[String]) -> ([u8; 3], String) {
+/// What the tray shows: line color, tooltip, and how many finished sessions aren't checked yet.
+type TrayLook = ([u8; 3], String, usize);
+
+/// 3×5 pixel glyphs (rows top to bottom, 3 bits each) for the taskbar badge count.
+fn glyph(c: char) -> u16 {
+    match c {
+        '1' => 0b010_110_010_010_111,
+        '2' => 0b111_001_111_100_111,
+        '3' => 0b111_001_111_001_111,
+        '4' => 0b101_101_111_001_001,
+        '5' => 0b111_100_111_001_111,
+        '6' => 0b111_100_111_101_111,
+        '7' => 0b111_001_001_001_001,
+        '8' => 0b111_101_111_101_111,
+        '9' => 0b111_101_111_001_111,
+        _ => 0b000_010_111_010_000, // '+'
+    }
+}
+
+/// 32×32 taskbar overlay: a green circle with the unchecked count in white ("9+" past nine),
+/// shown in the corner of AgentPulse's taskbar button like a chat app's badge.
+fn badge_icon(count: usize) -> Image<'static> {
+    const N: usize = 32;
+    const GREEN: [u8; 3] = [0x05, 0x96, 0x69]; // darker than the tray dot, so white digits stay readable
+    let text: Vec<char> = if count > 9 { vec!['9', '+'] } else { count.to_string().chars().collect() };
+    let scale = if text.len() == 1 { 4 } else { 3 };
+    let width = text.len() * 3 * scale + (text.len() - 1) * scale;
+    let (x0, y0) = ((N - width) / 2, (N - 5 * scale) / 2);
+    let lit = |x: usize, y: usize| -> bool {
+        let (Some(dx), Some(dy)) = (x.checked_sub(x0), y.checked_sub(y0)) else { return false };
+        let (gx, gy) = (dx / scale, dy / scale);
+        let (i, col) = (gx / 4, gx % 4); // 3 columns + 1 gap per glyph
+        match text.get(i) {
+            Some(&c) if col < 3 && gy < 5 => (glyph(c) >> ((4 - gy) * 3 + (2 - col))) & 1 == 1,
+            _ => false,
+        }
+    };
+    let mut px = Vec::with_capacity(N * N * 4);
+    for y in 0..N {
+        for x in 0..N {
+            let d = (x as f32 + 0.5 - 16.0).hypot(y as f32 + 0.5 - 16.0);
+            let a = ((16.0 - d).clamp(0.0, 1.0) * 255.0) as u8;
+            let rgb = if lit(x, y) { [255, 255, 255] } else { GREEN };
+            px.extend_from_slice(&[rgb[0], rgb[1], rgb[2], a]);
+        }
+    }
+    Image::new_owned(px, N as u32, N as u32)
+}
+
+/// Tray look from hook states, log-only agents, running sub-agents and unchecked finished sessions.
+fn tray_status(live: &HashMap<String, events::Live>, logs: &HashMap<String, stats::LogState>, agent_sessions: &[String], unchecked: usize) -> TrayLook {
     let recent = Timestamp::now() - SignedDuration::from_hours(8);
     let hooked = |s| live.values().filter(|l| l.state == s && l.since > recent).count();
     let needs = hooked(State::NeedsYou);
@@ -423,6 +509,9 @@ fn tray_status(live: &HashMap<String, events::Live>, logs: &HashMap<String, stat
     if needs > 0 {
         parts.push(format!("{needs} need{} you", if needs == 1 { "s" } else { "" }));
     }
+    if unchecked > 0 {
+        parts.push(format!("{unchecked} finished, not checked yet"));
+    }
     if working > 0 {
         parts.push(format!("{working} working"));
     }
@@ -431,16 +520,18 @@ fn tray_status(live: &HashMap<String, events::Live>, logs: &HashMap<String, stat
     }
     let tip = if parts.is_empty() { "AgentPulse: all quiet".to_string() } else { format!("AgentPulse: {}", parts.join(", ")) };
     let color = if needs > 0 { NEEDS_YOU } else if working + agents > 0 { WORKING } else { QUIET };
-    (color, tip)
+    (color, tip, unchecked)
 }
 
 /// Every 2 s: refresh all agent logs (agents without hooks only show up there), alert when a
-/// log-only session finishes its turn, and keep the tray light current. The first pass also
-/// parses the whole history, so the first dashboard call is fast.
+/// log-only session finishes its turn, and keep the tray light and badge current. The first pass
+/// also parses the whole history, so the first dashboard call is fast.
 fn spawn_monitor(app: AppHandle) {
     std::thread::spawn(move || {
         let mut before: Option<HashMap<String, stats::LogState>> = None;
-        let mut shown: Option<([u8; 3], String)> = None;
+        // Plus whether the dashboard was visible: Windows drops a taskbar overlay when the window
+        // hides, so it's set again when the window comes back.
+        let mut shown: Option<(TrayLook, bool)> = None;
         loop {
             let state = app.state::<AppState>();
             let snapshot = state.cache.lock().ok().map(|mut cache| {
@@ -451,23 +542,39 @@ fn spawn_monitor(app: AppHandle) {
             });
             if let Some((logs, agents)) = snapshot {
                 if let Some(b) = &before {
-                    for (kind, s) in stats::log_alerts(b, &logs) {
+                    for (kind, id, s) in stats::log_alerts(b, &logs) {
                         let (what, body) = match kind {
                             AlertKind::Done => ("finished", "Task complete."),
                             AlertKind::NeedsYou => ("needs you", "Waiting for your approval."),
                         };
                         let title = format!("{} {what}: {}", s.provider.label(), s.project);
-                        on_alert(&app, &events::Alert { kind, project: s.project.clone(), title, body: body.into() });
+                        on_alert(&app, &events::Alert { kind, project: s.project.clone(), title, body: body.into(), session: id.to_string() });
                     }
                 }
                 let live = state.live.lock().map(|l| l.clone()).unwrap_or_default();
-                let status = tray_status(&live, &logs, &agents);
-                if shown.as_ref() != Some(&status) {
+                let unchecked = state
+                    .unchecked
+                    .lock()
+                    .map(|mut u| {
+                        u.retain(|id| stats::still_unchecked(live.get(id).map(|l| l.state), logs.get(id).map(|s| s.state)));
+                        u.len()
+                    })
+                    .unwrap_or(0);
+                let look = tray_status(&live, &logs, &agents, unchecked);
+                let main = app.get_webview_window("main");
+                let visible = main.as_ref().is_some_and(|w| w.is_visible().unwrap_or(false));
+                let now_shown = (look, visible);
+                if shown.as_ref() != Some(&now_shown) {
+                    let count = now_shown.0 .2;
                     if let Some(tray) = app.tray_by_id("main") {
-                        let _ = tray.set_icon(Some(tray_icon(status.0)));
-                        let _ = tray.set_tooltip(Some(&status.1));
+                        let _ = tray.set_icon(Some(tray_icon(now_shown.0 .0, count > 0)));
+                        let _ = tray.set_tooltip(Some(&now_shown.0 .1));
                     }
-                    shown = Some(status);
+                    #[cfg(windows)]
+                    if let Some(w) = main {
+                        let _ = w.set_overlay_icon((count > 0).then(|| badge_icon(count)));
+                    }
+                    shown = Some(now_shown);
                 }
                 before = Some(logs);
             }
@@ -505,6 +612,7 @@ pub fn run() {
             test_push,
             test_sound,
             set_sound,
+            mark_all_checked,
             decide_permission,
             session_history,
             toggle_widget,
@@ -550,6 +658,7 @@ pub fn run() {
                 approvals: approvals.clone(),
                 decisions_dir: data.join("decisions"),
                 widget_flag: widget_flag.clone(),
+                unchecked: Mutex::new(HashSet::new()),
             });
             if !std::env::args().any(|a| a == MINIMIZED_FLAG) {
                 show_main(app.handle());
@@ -565,7 +674,7 @@ pub fn run() {
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open, &widget, &quit])?;
             TrayIconBuilder::with_id("main")
-                .icon(tray_icon(QUIET))
+                .icon(tray_icon(QUIET, false))
                 .tooltip("AgentPulse")
                 .menu(&menu)
                 .show_menu_on_left_click(false)
@@ -588,14 +697,21 @@ pub fn run() {
             Ok(())
         })
         // Closing a window hides it; "Quit" in the tray menu exits.
-        .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
+        .on_window_event(|window, event| match event {
+            WindowEvent::CloseRequested { api, .. } => {
                 api.prevent_close();
                 let _ = window.hide();
                 if window.label() == "widget" {
                     remember_widget(window.app_handle(), false);
                 }
             }
+            // Opening the dashboard = you've seen the board: the badge goes away.
+            WindowEvent::Focused(true) if window.label() == "main" => {
+                if let Ok(mut u) = window.app_handle().state::<AppState>().unchecked.lock() {
+                    u.clear();
+                }
+            }
+            _ => {}
         })
         .run(tauri::generate_context!())
         .expect("error while running AgentPulse");
@@ -607,11 +723,33 @@ mod tests {
 
     #[test]
     fn tray_icon_is_a_rounded_square_with_the_status_line() {
-        let px = tray_icon(WORKING).rgba().to_vec();
+        let px = tray_icon(WORKING, false).rgba().to_vec();
         let at = |x: usize, y: usize| &px[(y * 32 + x) * 4..(y * 32 + x) * 4 + 4];
         assert_eq!(at(0, 0)[3], 0); // rounded corner is transparent
         assert_eq!(at(16, 2)[3], 255); // inside the square
         assert_eq!(&at(8, 17)[..3], &WORKING); // on the flat part of the pulse line
+        assert_eq!(&at(25, 6)[..3], &[0x15, 0x18, 0x2b]); // no badge: plain tile there
+    }
+
+    #[test]
+    fn unchecked_badge_is_a_green_dot_cut_into_the_corner() {
+        let px = tray_icon(QUIET, true).rgba().to_vec();
+        let at = |x: usize, y: usize| &px[(y * 32 + x) * 4..(y * 32 + x) * 4 + 4];
+        assert_eq!(at(25, 6), &[0x34, 0xd3, 0x99, 255]); // the dot
+        assert_eq!(at(19, 6)[3], 0); // transparent gap between dot and tile
+        assert_eq!(&at(8, 17)[..3], &QUIET); // the pulse line is untouched
+    }
+
+    #[test]
+    fn taskbar_badge_is_a_green_circle_with_the_count() {
+        let px = badge_icon(1).rgba().to_vec();
+        let at = |x: usize, y: usize| &px[(y * 32 + x) * 4..(y * 32 + x) * 4 + 4];
+        assert_eq!(at(0, 0)[3], 0); // round
+        assert_eq!(at(16, 30), &[0x05, 0x96, 0x69, 255]); // green body
+        assert_eq!(&at(15, 7)[..3], &[255, 255, 255]); // top of the "1" (middle column, first row)
+        assert_eq!(&at(11, 7)[..3], &[0x05, 0x96, 0x69]); // left of it is empty in a "1"
+        // past nine: "9+", and it must differ from a single digit
+        assert_ne!(badge_icon(12).rgba(), badge_icon(9).rgba());
     }
 
     #[test]
@@ -620,9 +758,9 @@ mod tests {
         let l = |state| events::Live { state, since: now, project: "p".into(), message: String::new() };
         let live = HashMap::from([("a".to_string(), l(State::NeedsYou)), ("gone".to_string(), l(State::Ended))]);
         let logs = HashMap::from([("cx".to_string(), stats::LogState { state: "working", provider: Provider::Codex, project: "p".into() })]);
-        let (color, tip) = tray_status(&live, &logs, &["s".into(), "gone".into()]);
-        assert_eq!((color, tip.as_str()), (NEEDS_YOU, "AgentPulse: 1 needs you, 1 working, 1 sub-agent running"));
-        assert_eq!(tray_status(&HashMap::new(), &HashMap::new(), &[]), (QUIET, "AgentPulse: all quiet".to_string()));
-        assert_eq!(tray_status(&HashMap::new(), &HashMap::new(), &["s".into()]).0, WORKING);
+        let (color, tip, badge) = tray_status(&live, &logs, &["s".into(), "gone".into()], 2);
+        assert_eq!((color, tip.as_str(), badge), (NEEDS_YOU, "AgentPulse: 1 needs you, 2 finished, not checked yet, 1 working, 1 sub-agent running", 2));
+        assert_eq!(tray_status(&HashMap::new(), &HashMap::new(), &[], 0), (QUIET, "AgentPulse: all quiet".to_string(), 0));
+        assert_eq!(tray_status(&HashMap::new(), &HashMap::new(), &["s".into()], 0).0, WORKING);
     }
 }

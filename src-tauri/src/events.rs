@@ -143,6 +143,8 @@ pub struct Alert {
     pub project: String,
     pub title: String,
     pub body: String,
+    /// Which session it is about (for the "not checked yet" badge). Empty when unknown.
+    pub session: String,
 }
 
 /// Updates session state for one event. Returns an alert when the user should be told.
@@ -151,7 +153,7 @@ pub fn apply(store: &mut HashMap<String, Live>, e: &HookEvent, now: Timestamp) -
     let project = clean(if e.project.is_empty() { "Claude Code" } else { &e.project });
     let message = clean(&e.message);
     let prev = store.get(&e.session_id).map(|l| l.state);
-    let alert = |kind, title: String, body: String| Some(Alert { kind, project: project.clone(), title, body });
+    let alert = |kind, title: String, body: String| Some(Alert { kind, project: project.clone(), title, body, session: e.session_id.clone() });
 
     let (state, alert) = match e.event.as_str() {
         "SessionStart" => (State::Done, None),

@@ -30,9 +30,9 @@ Running Claude Code in three terminals, Codex in a fourth, and a pile of sub-age
 | **Insights** | Today's cost vs. yesterday at the same time, burn rate ($/hour right now), money saved by prompt caching, most expensive session, average per session and per request, cost by model and by agent. |
 | **History** | 7 or 30-day cost chart, top projects, and a weekday × hour heatmap of when you actually work with your agents. |
 | **Settings** | Which agents were found on this computer, one-click **Connect hooks** for Claude Code (backs up your settings first, touches only AgentPulse's own entries), **Alert sound**, approvals, phone notifications, **Start with Windows**, and **Updates**. |
-| **Floating widget** | An always-on-top companion for a second monitor: sessions **grouped by agent** (collapsible, with each agent's state counts and spend today), running sub-agents, **Allow once / Deny** for approvals right in the widget, Codex plan usage inside its group, today's cost, and a bell to mute alert sounds. Click a session to jump to its project in VS Code. It sizes itself to its content, collapses to a single strip, and remembers where you put it. |
-| **Tray icon** | The AgentPulse mark, colored by status: grey = quiet, blue = something's working (including sub-agents), amber = a session needs you. The tooltip says what. |
-| **Notifications + sound** | Native popups and a soft chime when a task finishes or needs you: two calm notes, falling for *done* and rising for *needs you*, so you can tell them apart without looking. Works for Codex and Copilot too (from their logs). Each sound can be turned off. |
+| **Floating widget** | An always-on-top companion for a second monitor: sessions **grouped by agent** (collapsible, with each agent's state counts and spend today), running sub-agents, **Allow once / Deny** for approvals right in the widget, Codex plan usage inside its group, today's cost, a green "new" marker on finished sessions you haven't checked yet, and a bell to mute alert sounds. Click a session to jump to its project in VS Code. It sizes itself to its content, collapses to a single strip, and remembers where you put it. |
+| **Tray icon** | The AgentPulse mark, colored by status: grey = quiet, blue = something's working (including sub-agents), amber = a session needs you. A **green dot** means a task finished that you haven't checked yet; while the dashboard is open, its **taskbar button** shows a green badge with the count. Both clear when you open the dashboard, open that session, or pick it back up. The tooltip says what. |
+| **Notifications + sound** | Native popups and a quiet chime when a task finishes or needs you: two soft notes, falling for *done* and rising for *needs you*, so you can tell them apart without looking. Works for Codex and Copilot too (from their logs). Each sound can be turned off. |
 | **Phone notifications** | Optional push to your phone through [ntfy](https://ntfy.sh) (free, open source), so you can walk away while Claude works. Off by default, private random topic, generic messages unless you opt in to details, self-hosted servers supported. |
 
 ### Supported agents
@@ -50,6 +50,7 @@ Planned: macOS/Linux.
 ## 2. Quick start (Windows)
 
 1. Download `AgentPulse_<version>_x64-setup.exe` from the [latest release](../../releases/latest) and run it. It installs for your user only, no admin needed. (Or build it yourself, see [Development](#6-development).)
+   Windows may say *"Windows protected your PC"*: the installer isn't code-signed with a paid certificate yet. Click **More info → Run anyway**. (Updates are signed and verified by the app.) What changed in each version: [CHANGELOG](CHANGELOG.md).
 2. Open AgentPulse, go to **Settings** and click **Connect hooks…**. It shows what will change, backs up `%USERPROFILE%\.claude\settings.json`, and adds one AgentPulse entry to each of the 6 hook events. Your other settings and hooks are left alone.
 3. Start a new Claude Code session. The Live board now updates instantly.
 4. Optional: turn on **Start with Windows** in Settings.

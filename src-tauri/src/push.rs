@@ -55,7 +55,7 @@ mod tests {
     use super::*;
 
     fn alert(kind: AlertKind) -> Alert {
-        Alert { kind, project: "secret-project".into(), title: "Claude needs you: secret-project".into(), body: "Allow rm -rf build?".into() }
+        Alert { kind, project: "secret-project".into(), title: "Claude needs you: secret-project".into(), body: "Allow rm -rf build?".into(), session: String::new() }
     }
 
     fn settings(include_details: bool) -> PushSettings {

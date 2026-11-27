@@ -84,6 +84,8 @@ export type Dashboard = {
   providers_today: NameValue[];
   sources: Source[];
   sound_enabled: boolean;
+  /** Sessions that finished and haven't been checked yet (badge). */
+  unchecked: string[];
 };
 // Mirrors stats::SessionRow.
 export type SessionRow = {
@@ -145,6 +147,7 @@ export const toggleWidget = () => invoke("toggle_widget");
 export const openDashboard = () => invoke("open_dashboard");
 export const testSound = (kind: "done" | "needs_you") => invoke("test_sound", { kind });
 export const setSound = (enabled: boolean) => invoke<boolean>("set_sound", { enabled });
+export const markAllChecked = () => invoke("mark_all_checked");
 export const openSession = (id: string) => invoke("open_session", { id });
 /** Project folder in VS Code (brings an open window forward). Any agent; never starts one. */
 export const focusSession = (id: string) => invoke("focus_session", { id });

@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
-import { focusSession, openDashboard, setSound, toggleWidget, useDashboard, type Dashboard, type Provider, type Session } from "./api";
+import { focusSession, markAllChecked, openDashboard, setSound, toggleWidget, useDashboard, type Dashboard, type Provider, type Session } from "./api";
 import { money, since, tokens } from "./format";
 import { BellIcon, BellOffIcon, ChevronIcon, CloseIcon, ExternalIcon } from "./components/Icons";
 import { StatusDot } from "./components/StatusBadge";
@@ -100,13 +100,15 @@ export default function Widget() {
   // A row click goes to where the session lives (its project in VS Code), not to the dashboard.
   const reveal = (id: string) => {
     setFailed(null);
-    focusSession(id).catch((e) => setFailed({ id, error: String(e) }));
+    focusSession(id).then(reload).catch((e) => setFailed({ id, error: String(e) }));
   };
+  const clearNew = () => markAllChecked().then(reload).catch(() => {});
   const flipSound = () => data && setSound(!data.sound_enabled).then(reload).catch(() => {});
 
   const now = Date.now();
   const needs = data ? Math.max(data.needs_you, pending) : 0;
-  const quiet = !!data && needs + data.working + data.agents_running === 0;
+  const unchecked = new Set(data?.unchecked ?? []);
+  const quiet = !!data && needs + data.working + data.agents_running + unchecked.size === 0;
   const groups = data ? groupByAgent(data) : [];
 
   return (
@@ -117,6 +119,11 @@ export default function Widget() {
           {!data ? "Loading…" : quiet ? <span className="w-quiet" data-tauri-drag-region>All quiet</span> : (
             <>
               {needs > 0 && <span className="w-pill w-pill-needs">{needs} need{needs === 1 ? "s" : ""} you</span>}
+              {unchecked.size > 0 && (
+                <button className="w-pill w-pill-new" onClick={clearNew} title="Finished, not checked yet. Click to mark all as checked.">
+                  {unchecked.size} new
+                </button>
+              )}
               {data.working > 0 && <span className="w-pill w-pill-working">{data.working} working</span>}
               {data.agents_running > 0 && <span className="w-pill w-pill-agents">{data.agents_running} agent{data.agents_running === 1 ? "" : "s"}</span>}
             </>
@@ -164,6 +171,7 @@ export default function Widget() {
                               <span className="w-main">
                                 <span className="w-line">
                                   <span className="w-title">{s.title}</span>
+                                  {unchecked.has(s.id) && <span className="w-new" title="Finished, not checked yet">new</span>}
                                   <span className="w-cost">{s.provider === "copilot" ? `${s.requests} req` : money(s.cost)}</span>
                                 </span>
                                 <span className="w-sub">{s.project || "unknown project"} · {when(s, now)}</span>

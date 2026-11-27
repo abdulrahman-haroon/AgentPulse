@@ -16,6 +16,7 @@ fn main() {
         "test_push",
         "test_sound",
         "set_sound",
+        "mark_all_checked",
         "decide_permission",
         "session_history",
         "toggle_widget",

@@ -460,6 +460,9 @@ button:disabled { opacity: 0.5; cursor: default; filter: none; }
 .w-pill-needs { background: var(--needs-soft); color: var(--needs); }
 .w-pill-working { background: var(--working-soft); color: var(--working); }
 .w-pill-agents { background: var(--agents-soft); color: var(--agents); }
+.w-pill-new { border: 0; font: inherit; font-weight: 650; background: var(--done-soft); color: var(--done); cursor: pointer; }
+.w-pill-new:hover { background: color-mix(in srgb, var(--done) 24%, transparent); }
+.w-new { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding: 0 5px; border-radius: 4px; background: var(--done-soft); color: var(--done); white-space: nowrap; }
 .w-btn { border: 0; background: transparent; color: var(--muted); padding: 5px; border-radius: 7px; display: flex; }
 .w-btn:hover { background: var(--card-2); color: var(--ink); }
 .widget > .approval { margin: 0 8px 8px; padding: 10px 12px; gap: 6px; border-radius: 12px; }

@@ -132,14 +132,20 @@ pub fn log_states(meta: &HashMap<&str, &SessionMeta>, now: Timestamp) -> HashMap
 /// What changed since the last check that deserves an alert: working → done ("finished") and
 /// anything → needs_you. Sessions seen for the first time don't alert.
 /// shortcut: a whole turn shorter than one check (2 s) is missed; a per-turn counter would catch it.
-pub fn log_alerts<'a>(before: &HashMap<String, LogState>, now: &'a HashMap<String, LogState>) -> Vec<(AlertKind, &'a LogState)> {
+pub fn log_alerts<'a>(before: &HashMap<String, LogState>, now: &'a HashMap<String, LogState>) -> Vec<(AlertKind, &'a str, &'a LogState)> {
     now.iter()
         .filter_map(|(id, s)| match (before.get(id)?.state, s.state) {
-            ("working", "done") => Some((AlertKind::Done, s)),
-            (b, "needs_you") if b != "needs_you" => Some((AlertKind::NeedsYou, s)),
+            ("working", "done") => Some((AlertKind::Done, id.as_str(), s)),
+            (b, "needs_you") if b != "needs_you" => Some((AlertKind::NeedsYou, id.as_str(), s)),
             _ => None,
         })
         .collect()
+}
+
+/// A finished session stays "not checked yet" until the user picks it back up (it works or asks
+/// again) or closes it. Opening it from AgentPulse or opening the dashboard clears it too (lib.rs).
+pub fn still_unchecked(hook: Option<State>, log: Option<&str>) -> bool {
+    !matches!(hook, Some(State::Working | State::NeedsYou | State::Ended)) && !matches!(log, Some("working" | "needs_you"))
 }
 
 #[derive(Serialize, Debug)]
@@ -174,6 +180,8 @@ pub struct Dashboard {
     pub sources: Vec<SourceView>,
     /// Alert chimes on (from settings; the widget's bell shows and flips it). Filled in by lib.rs.
     pub sound_enabled: bool,
+    /// Sessions that finished since the user last looked ("not checked yet"). Filled in by lib.rs.
+    pub unchecked: Vec<String>,
 }
 
 #[derive(Serialize, Debug, PartialEq)]
@@ -377,6 +385,7 @@ pub fn build<'a>(
         providers_today: vec![],
         sources: vec![],
         sound_enabled: true,
+        unchecked: vec![],
     };
     let mut models = HashMap::new();
     let mut projects = HashMap::new();
@@ -717,7 +726,7 @@ mod tests {
         let after = log_states(&HashMap::from([("cx", &m)]), now.timestamp());
         let done = log_alerts(&before, &after);
         assert_eq!(done.len(), 1);
-        assert_eq!((done[0].0, done[0].1.provider, done[0].1.project.as_str()), (AlertKind::Done, Provider::Codex, "web-shop"));
+        assert_eq!((done[0].0, done[0].1, done[0].2.provider, done[0].2.project.as_str()), (AlertKind::Done, "cx", Provider::Codex, "web-shop"));
         assert!(log_alerts(&after, &after).is_empty()); // only once
         // a pending permission in the log (Copilot) is "needs you", and alerts once
         m.last_stop = Some("needs_input".into());
@@ -729,6 +738,17 @@ mod tests {
         // Claude sessions are left to the hooks
         let claude = SessionMeta { last_ts: Some(now.timestamp()), ..Default::default() };
         assert!(log_states(&HashMap::from([("c", &claude)]), now.timestamp()).is_empty());
+    }
+
+    #[test]
+    fn finished_sessions_stay_unchecked_until_picked_up_or_closed() {
+        assert!(still_unchecked(Some(State::Done), None));
+        assert!(still_unchecked(None, Some("done")));
+        assert!(still_unchecked(None, None)); // log rotated away: keep until the dashboard is opened
+        assert!(!still_unchecked(Some(State::Working), None)); // the user typed again
+        assert!(!still_unchecked(Some(State::NeedsYou), None));
+        assert!(!still_unchecked(Some(State::Ended), None)); // closed
+        assert!(!still_unchecked(None, Some("working")));
     }
 
     #[test]
