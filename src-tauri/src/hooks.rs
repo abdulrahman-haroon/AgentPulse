@@ -15,6 +15,11 @@ pub const PERMISSION_HOOK_TIMEOUT: u64 = crate::settings::MAX_APPROVAL_WAIT + 30
 /// The hook script, compiled into the app so installs don't depend on where the repo lives.
 pub const SCRIPT: &str = include_str!("../../hooks/notify.ps1");
 
+/// Status-line wrapper: saves Claude Code's plan-limit numbers, then runs the user's own status line.
+pub const STATUSLINE_SCRIPT: &str = include_str!("../../hooks/statusline.ps1");
+
+pub const STATUS_LINE: &str = "StatusLine";
+
 #[derive(serde::Serialize, Debug, PartialEq)]
 pub struct HookStatus {
     pub installed: Vec<String>,
@@ -27,6 +32,13 @@ fn is_ours(cmd: &str) -> bool {
     c.contains("notify.ps1") && c.contains("agentpulse")
 }
 
+fn is_our_status_line(settings: &Value) -> bool {
+    settings["statusLine"]["command"].as_str().is_some_and(|c| {
+        let c = c.to_ascii_lowercase();
+        c.contains("statusline.ps1") && c.contains("agentpulse")
+    })
+}
+
 pub fn command_for(script: &Path) -> String {
     // Forward slashes: valid on Windows and no JSON/PowerShell backslash surprises.
     let p = script.to_string_lossy().replace('\\', "/");
@@ -34,12 +46,58 @@ pub fn command_for(script: &Path) -> String {
 }
 
 pub fn status(settings: &Value) -> HookStatus {
-    let (installed, missing) = HOOK_EVENTS.iter().map(|e| e.to_string()).partition(|e| {
+    let (mut installed, mut missing): (Vec<String>, Vec<String>) = HOOK_EVENTS.iter().map(|e| e.to_string()).partition(|e| {
         settings["hooks"][e]
             .as_array()
             .is_some_and(|groups| groups.iter().any(|g| g["hooks"].as_array().is_some_and(|hs| hs.iter().any(|h| h["command"].as_str().is_some_and(is_ours)))))
     });
+    if is_our_status_line(settings) { &mut installed } else { &mut missing }.push(STATUS_LINE.into());
     HookStatus { installed, missing }
+}
+
+/// What to do with the saved copy of the user's own status line after [`wrap_status_line`].
+#[derive(Debug, PartialEq)]
+pub enum SavedStatusLine {
+    /// Already wrapped (or not wrappable): keep whatever was saved before.
+    Keep,
+    /// Save this (`None` = the user had no status line).
+    Save(Option<Value>),
+}
+
+/// Points `statusLine` at our wrapper, keeping its other keys (padding, refreshInterval...).
+/// The user's own status line is returned so the wrapper can run it and disconnect can restore it.
+/// A `statusLine` that isn't a command object is left alone.
+pub fn wrap_status_line(mut settings: Value, command: &str) -> (Value, SavedStatusLine) {
+    if is_our_status_line(&settings) {
+        settings["statusLine"]["command"] = json!(command); // refresh the path, keep the saved original
+        return (settings, SavedStatusLine::Keep);
+    }
+    let Some(root) = settings.as_object_mut() else { return (settings, SavedStatusLine::Keep) };
+    let original = root.get("statusLine").cloned();
+    let mut ours = match &original {
+        None => Map::new(),
+        Some(Value::Object(o)) if o.get("type").and_then(Value::as_str).is_none_or(|t| t == "command") => o.clone(),
+        Some(_) => return (settings, SavedStatusLine::Keep),
+    };
+    ours.insert("type".into(), json!("command"));
+    ours.insert("command".into(), json!(command));
+    root.insert("statusLine".into(), Value::Object(ours));
+    (settings, SavedStatusLine::Save(original))
+}
+
+/// Puts the user's own status line back (or removes ours if they had none). Leaves a status line
+/// that isn't ours untouched.
+pub fn restore_status_line(mut settings: Value, original: Option<Value>) -> Value {
+    if !is_our_status_line(&settings) {
+        return settings;
+    }
+    if let Some(root) = settings.as_object_mut() {
+        match original {
+            Some(o @ Value::Object(_)) => root.insert("statusLine".into(), o),
+            _ => root.remove("statusLine"),
+        };
+    }
+    settings
 }
 
 /// Removes our entries from every event; drops groups/events/`hooks` left empty by that.
@@ -155,7 +213,35 @@ mod tests {
         assert_eq!(after.as_object().unwrap().keys().collect::<Vec<_>>(), ["model", "hooks", "theme"]);
         assert_eq!(after["hooks"]["Stop"][0]["hooks"][0]["command"], "my-own-script.sh");
         assert_eq!(after["hooks"]["Stop"][1]["hooks"][0]["command"], CMD);
-        assert_eq!(status(&after).missing, Vec::<String>::new());
+        assert_eq!(status(&after).missing, [STATUS_LINE]);
+    }
+
+    const SL: &str = r#"powershell -NoProfile -ExecutionPolicy Bypass -File "C:/x/dev.agentpulse.app/hooks/statusline.ps1""#;
+
+    #[test]
+    fn status_line_wrap_and_restore_roundtrip() {
+        let mine = json!({ "type": "command", "command": "~/my-line.sh", "padding": 1 });
+        let before = json!({ "model": "opus", "statusLine": mine.clone() });
+        let (s, saved) = wrap_status_line(before.clone(), SL);
+        assert_eq!(saved, SavedStatusLine::Save(Some(mine.clone())));
+        assert_eq!(s["statusLine"], json!({ "type": "command", "command": SL, "padding": 1 }));
+        assert_eq!(status(&s).installed, [STATUS_LINE]);
+        // wrapping again never saves our own wrapper as "the original"
+        let (s, again) = wrap_status_line(s, SL);
+        assert_eq!(again, SavedStatusLine::Keep);
+        assert_eq!(restore_status_line(s, Some(mine)), before);
+    }
+
+    #[test]
+    fn status_line_without_original_and_foreign_shapes() {
+        let (s, saved) = wrap_status_line(json!({}), SL);
+        assert_eq!((saved, &s["statusLine"]), (SavedStatusLine::Save(None), &json!({ "type": "command", "command": SL })));
+        assert_eq!(restore_status_line(s, None), json!({}));
+        // not ours / not a command object: never touched
+        let odd = json!({ "statusLine": "weird" });
+        assert_eq!(wrap_status_line(odd.clone(), SL), (odd.clone(), SavedStatusLine::Keep));
+        let other = json!({ "statusLine": { "type": "command", "command": "x.sh" } });
+        assert_eq!(restore_status_line(other.clone(), None), other);
     }
 
     #[test]

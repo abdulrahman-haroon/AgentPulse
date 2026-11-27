@@ -77,6 +77,7 @@ pub fn ingest(d: &mut FileData, line: &str, fallback: &str) {
                         output,
                         cost: pricing::openai_cost(&model, input, cached, output),
                         cache_saved: pricing::openai_cache_savings(&model, input, cached),
+                        ai_credits: 0.0,
                         model,
                     });
                 }
@@ -104,7 +105,7 @@ fn limit(v: &Value) -> Option<PlanLimit> {
         m => format!("{m}-min"),
     };
     let resets_at = v["resets_at"].as_i64().and_then(|s| Timestamp::from_second(s).ok()).map(|t| t.to_string());
-    Some(PlanLimit { provider: Provider::Codex, window, used_percent: used.clamp(0.0, 100.0), resets_at })
+    Some(PlanLimit { provider: Provider::Codex, window, used_percent: used.clamp(0.0, 100.0), resets_at, ..Default::default() })
 }
 
 /// `rollout-2026-06-15T12-00-00-<uuid>` → the uuid (used only if session_meta is missing).

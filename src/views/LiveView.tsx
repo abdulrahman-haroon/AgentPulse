@@ -45,7 +45,7 @@ export function LiveView({ data, hooksMissing }: { data: Dashboard; hooksMissing
         <section className="card">
           <div className="card-head">
             <h2 className="card-title">Plan usage</h2>
-            <span className="muted small-inline">reported by the agent's own logs</span>
+            <span className="muted small-inline">from the agents themselves; Copilot is an estimate</span>
           </div>
           <LimitBars limits={data.limits} now={now} />
         </section>

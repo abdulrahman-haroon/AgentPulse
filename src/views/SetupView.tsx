@@ -8,12 +8,13 @@ import { UpdatesCard } from "../components/UpdatesCard";
 import { PhoneCard } from "../components/PhoneCard";
 import { ApprovalsSettingsCard } from "../components/ApprovalsSettingsCard";
 import { SoundCard } from "../components/SoundCard";
+import { PlanLimitsCard } from "../components/PlanLimitsCard";
 import { ProviderTag } from "../components/Agents";
 
 const HOW: Record<string, string> = {
-  claude: "Hooks + session logs: exact live states, approvals, cost, sub-agents.",
+  claude: "Hooks + session logs: exact live states, approvals, cost, sub-agents. Status line: your real plan usage (5-hour and weekly limits).",
   codex: "Session logs: live state, cost estimate, and your real plan usage (5-hour and weekly limits).",
-  copilot: "Session logs: live state, Needs you when it asks for permission, finished alerts, tokens and sub-agents. No cost: Copilot bills per premium request.",
+  copilot: "Session logs: live state, Needs you when it asks for permission, finished alerts, tokens, sub-agents, and an estimate of this month's AI credits. No cost estimate: Copilot bills in credits.",
 };
 
 const WHAT: Record<string, string> = {
@@ -23,6 +24,7 @@ const WHAT: Record<string, string> = {
   PermissionRequest: "Claude asks to use a tool → approve here (if on)",
   Stop: "a task finishes → Done + notification",
   SessionEnd: "a session closes",
+  StatusLine: "plan limits (5-hour, weekly); your own status line still shows",
 };
 
 type Props = { status: HookStatus | null; setStatus: (s: HookStatus) => void; recheck: () => void; update: UpdateInfo | null; sources: Source[] };
@@ -44,6 +46,8 @@ export function SetupView({ status, setStatus, recheck, update, sources }: Props
 
   const connected = !!status && status.missing.length === 0;
   const partial = !!status && status.installed.length > 0 && !connected;
+  // The status line only feeds plan limits; alerts need just the event hooks.
+  const eventHooksConnected = !!status && status.missing.every((m) => m === "StatusLine");
 
   const run = async (f: () => Promise<HookStatus>) => {
     setBusy(true);
@@ -118,7 +122,8 @@ export function SetupView({ status, setStatus, recheck, update, sources }: Props
             <ul className="plain">
               <li>Back up <code>{status?.settings_path ?? "settings.json"}</code> next to it (timestamped copy).</li>
               <li>Add one AgentPulse hook to each of the 6 events above. Your other settings and hooks stay exactly as they are.</li>
-              <li>Install the hook script into AgentPulse's own data folder, so it keeps working wherever this app lives.</li>
+              <li>Point the status line at AgentPulse's small wrapper, which saves your plan-limit numbers and then runs your own status line (if you have one) unchanged. Disconnect puts yours back.</li>
+              <li>Install the hook scripts into AgentPulse's own data folder, so they keep working wherever this app lives.</li>
             </ul>
             <p className="muted">New Claude Code sessions pick it up. Already-open sessions need a restart. You can disconnect at any time.</p>
             <div className="confirm-actions">
@@ -157,12 +162,13 @@ export function SetupView({ status, setStatus, recheck, update, sources }: Props
       {settings && (
         <>
           <SoundCard sound={settings.sound} save={(sound) => savePart({ sound })} />
+          <PlanLimitsCard limits={settings.limits} save={(limits) => savePart({ limits })} statusLineReady={!!status?.installed.includes("StatusLine")} />
           <ApprovalsSettingsCard
             approvals={settings.approvals}
             save={(approvals) => savePart({ approvals })}
             hookReady={!!status?.installed.includes("PermissionRequest")}
           />
-          <PhoneCard push={settings.push} save={(push) => savePart({ push })} hooksConnected={connected} />
+          <PhoneCard push={settings.push} save={(push) => savePart({ push })} hooksConnected={eventHooksConnected} />
         </>
       )}
 

@@ -5,10 +5,13 @@
 //! - user.message (`content`), assistant.turn_start → working. NOT assistant.turn_end: Copilot ends
 //!   a "turn" after every model call; `session.usage_checkpoint` marks the finished task.
 //! - permission.requested / .completed → needs you / working again
-//! - session.usage_record (`usage.model`, `inputTokens`, `outputTokens`) → one request
+//! - session.usage_record (`usage.model`, `inputTokens`, `outputTokens`,
+//!   `copilotUsage.totalNanoAiu` = AI credits used) → one request
 //! - subagent.started / .completed (`toolCallId`, `agentName`, `agentDescription`, `executionMode`)
 //! - abort, session.shutdown (→ ended)
-//! Copilot is billed per premium request, so no cost is estimated.
+//!
+//! Copilot bills in AI credits, not per token at list price, so no USD cost is estimated; the
+//! logged credits feed the plan-usage estimate (`limits.rs`).
 
 use crate::logs::{self, FileData, Provider, Request, SubAgent};
 use jiff::Timestamp;
@@ -120,6 +123,8 @@ pub fn ingest(d: &mut FileData, line: &str, session: &str) {
                 output,
                 cost: None,
                 cache_saved: 0.0,
+                // Nano AI units; 1e9 = one GitHub AI credit ($0.01).
+                ai_credits: u["copilotUsage"]["totalNanoAiu"].as_f64().unwrap_or(0.0) / 1e9,
             });
         }
         "subagent.started" | "subagent.completed" | "subagent.failed" => {
@@ -163,7 +168,7 @@ mod tests {
             START,
             ASK,
             r#"{"type":"assistant.turn_start","data":{"turnId":"0"},"id":"e3","timestamp":"2026-06-15T12:00:06Z","parentId":"e2"}"#,
-            r#"{"type":"session.usage_record","data":{"usage":{"model":"gpt-6.1-terra","inputTokens":1000,"outputTokens":120,"cacheReadTokens":500,"cost":1}},"id":"e4","timestamp":"2026-06-15T12:00:09Z","parentId":"e3"}"#,
+            r#"{"type":"session.usage_record","data":{"usage":{"model":"gpt-6.1-terra","inputTokens":1000,"outputTokens":120,"cacheReadTokens":500,"cost":1,"copilotUsage":{"totalNanoAiu":2500000000}}},"id":"e4","timestamp":"2026-06-15T12:00:09Z","parentId":"e3"}"#,
             r#"{"type":"assistant.turn_end","data":{"turnId":"0"},"id":"e5","timestamp":"2026-06-15T12:00:10Z","parentId":"e4"}"#,
             r#"{"type":"subagent.started","data":{"toolCallId":"t1","agentName":"explore","agentDescription":"Find the router","executionMode":"background","model":"claude-haiku-4.5"},"id":"e6","timestamp":"2026-06-15T12:00:11Z","parentId":"e5"}"#,
             "not json",
@@ -175,6 +180,7 @@ mod tests {
         assert_eq!(d.titles["cs1"], "add rate limiting");
         let r = &d.requests[0];
         assert_eq!((d.requests.len(), r.output, r.tokens, r.model.as_str(), r.project.as_str(), r.cost), (1, 120, 1120, "gpt-6.1-terra", "api-gateway", None));
+        assert_eq!(r.ai_credits, 2.5);
         let a = &d.agents["t1"];
         assert_eq!((a.kind.as_str(), a.description.as_str(), a.background, a.finished), ("explore", "Find the router", true, false));
     }

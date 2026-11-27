@@ -536,6 +536,7 @@ mod tests {
             output,
             cost: Some(cost),
             cache_saved: 1.0,
+            ai_credits: 0.0,
         }
     }
 

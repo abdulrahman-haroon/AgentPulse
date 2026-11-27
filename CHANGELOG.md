@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **Claude Code plan limits.** See how much of your 5-hour and weekly limits you've used (and your spend limit, if your plan has one), with the reset time, in the widget and on the Live page. The numbers are Claude Code's own, read from its status line (Pro and Max plans). Existing installs: click **Repair connection…** in Settings once; your own status line keeps working.
+- **Copilot AI credits.** Pick your Copilot plan in Settings to see an estimate of this month's AI credits used, counted from this computer's Copilot CLI logs.
+
 ## 0.3.1
 
 - **Click a Claude Code session to open its chat.** In the widget (and the dashboard's *Open in VS Code*), Claude Code sessions that live in VS Code now open the conversation itself, not just the project. Terminal sessions (Copilot CLI, Codex, Claude Code CLI) still open their project in VS Code.

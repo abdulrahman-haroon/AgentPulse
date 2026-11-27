@@ -104,7 +104,7 @@ export default function Dashboard() {
             <p className="muted">Reading your agent history… the first load can take a few seconds.</p>
           </div>
         ) : page === "live" ? (
-          <LiveView data={data} hooksMissing={!!hooks && hooks.missing.length > 0} />
+          <LiveView data={data} hooksMissing={!!hooks && hooks.missing.some((m) => m !== "StatusLine")} />
         ) : page === "insights" ? (
           <InsightsView data={data} />
         ) : (

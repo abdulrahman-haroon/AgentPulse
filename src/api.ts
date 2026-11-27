@@ -19,7 +19,8 @@ export type Agent = {
   model: string;
 };
 /** Plan usage an agent reports about itself (Codex). Real numbers, not estimates. */
-export type PlanLimit = { provider: Provider; window: string; used_percent: number; resets_at: string | null };
+/** `detail`: e.g. "$314 of $500"; `as_of`: when the agent last reported it; `estimate`: computed by AgentPulse, not reported. */
+export type PlanLimit = { provider: Provider; window: string; used_percent: number; resets_at: string | null; detail: string | null; as_of: string | null; estimate: boolean };
 export type Source = { provider: Provider; label: string; path: string; found: boolean };
 export type Session = {
   id: string;
@@ -190,7 +191,9 @@ export type PushSettings = {
 };
 export type ApprovalSettings = { enabled: boolean; wait_seconds: number };
 export type SoundSettings = { enabled: boolean; on_done: boolean; on_needs_you: boolean };
-export type Settings = { push: PushSettings; approvals: ApprovalSettings; sound: SoundSettings };
+export type CopilotPlan = "" | "pro" | "pro_plus" | "max" | "custom";
+export type LimitSettings = { copilot_plan: CopilotPlan; copilot_custom_credits: number };
+export type Settings = { push: PushSettings; approvals: ApprovalSettings; sound: SoundSettings; limits: LimitSettings };
 export const decidePermission = (requestId: string, allow: boolean, reason: string) =>
   invoke("decide_permission", { requestId, allow, reason });
 export const getSettings = () => invoke<Settings>("get_settings");

@@ -3,6 +3,7 @@ mod codex;
 mod copilot;
 mod events;
 mod hooks;
+mod limits;
 mod logs;
 mod pricing;
 mod push;
@@ -33,6 +34,8 @@ struct AppState {
     states: Mutex<HashMap<String, &'static str>>,
     /// Installed copy of the hook script that settings.json points at.
     script_path: PathBuf,
+    /// Claude Code's plan-limit numbers, saved by the status-line wrapper.
+    claude_limits_path: PathBuf,
     settings: Mutex<settings::Settings>,
     settings_path: PathBuf,
     approvals: events::Approvals,
@@ -250,6 +253,13 @@ async fn dashboard(app: AppHandle) -> Result<stats::Dashboard, String> {
         let now = ZonedDateTime::now();
         let mut d = stats::build(cache.requests(), &cache.titles(), &cache.meta(), &cache.agents(), &live, &now);
         d.limits = cache.limits(now.timestamp());
+        if let Ok(snap) = std::fs::read_to_string(&state.claude_limits_path) {
+            d.limits.extend(limits::claude(&snap, now.timestamp()));
+        }
+        let allowance = state.settings.lock().ok().and_then(|s| s.limits.copilot_allowance());
+        if let Some(l) = allowance.and_then(|a| limits::copilot(cache.requests(), a, now.timestamp())) {
+            d.limits.push(l);
+        }
         d.sound_enabled = state.settings.lock().map(|s| s.sound.enabled).unwrap_or(true);
         d.unchecked = state.unchecked.lock().map(|u| u.iter().cloned().collect()).unwrap_or_default();
         d.replies = state.replies.views();
@@ -314,14 +324,21 @@ async fn hook_status(app: AppHandle) -> Result<HookInfo, String> {
     blocking(app, |s| hook_info(s, None)).await
 }
 
-/// Installs the hook script into AgentPulse's data folder and registers it for all six
-/// events in settings.json (backed up first). Only our own entries are touched.
+/// Installs the hook script into AgentPulse's data folder, registers it for all six events and
+/// wraps the Claude Code status line (for plan limits) in settings.json (backed up first).
+/// Only our own entries are touched; the user's own status line is saved and still runs.
 #[tauri::command]
 async fn connect_hooks(app: AppHandle) -> Result<HookInfo, String> {
     blocking(app, |s| {
         install_script(&s.script_path)?;
         let path = s.claude_dir.join("settings.json");
         let updated = hooks::connect(hooks::read_settings(&path)?, &hooks::command_for(&s.script_path))?;
+        let (updated, saved) = hooks::wrap_status_line(updated, &hooks::command_for(&statusline_path(&s.script_path)));
+        if let hooks::SavedStatusLine::Save(original) = saved {
+            // Saved before settings.json points at the wrapper, so the user's line never goes missing.
+            let text = serde_json::to_string_pretty(&original.unwrap_or(serde_json::Value::Null)).map_err(|e| e.to_string())?;
+            write_atomic(&original_status_line_path(&s.script_path), &text)?;
+        }
         std::fs::create_dir_all(&s.claude_dir).map_err(|e| e.to_string())?;
         let backup = hooks::write_settings(&path, &updated)?;
         hook_info(s, backup)
@@ -333,18 +350,38 @@ async fn connect_hooks(app: AppHandle) -> Result<HookInfo, String> {
 async fn disconnect_hooks(app: AppHandle) -> Result<HookInfo, String> {
     blocking(app, |s| {
         let path = s.claude_dir.join("settings.json");
-        let updated = hooks::disconnect(hooks::read_settings(&path)?)?;
+        let saved_path = original_status_line_path(&s.script_path);
+        let original = std::fs::read_to_string(&saved_path).ok().and_then(|t| serde_json::from_str(&t).ok());
+        let updated = hooks::restore_status_line(hooks::disconnect(hooks::read_settings(&path)?)?, original);
         let backup = hooks::write_settings(&path, &updated)?;
+        let _ = std::fs::remove_file(&saved_path);
         hook_info(s, backup)
     })
     .await
 }
 
+fn statusline_path(script: &std::path::Path) -> PathBuf {
+    script.with_file_name("statusline.ps1")
+}
+
+/// The user's own `statusLine` object (or `null`), run by the wrapper and restored on disconnect.
+fn original_status_line_path(script: &std::path::Path) -> PathBuf {
+    script.with_file_name("statusline-original.json")
+}
+
+fn write_atomic(path: &std::path::Path, text: &str) -> Result<(), String> {
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, text).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, path).map_err(|e| e.to_string())
+}
+
+/// Installs (or refreshes) both scripts next to each other.
 fn install_script(path: &std::path::Path) -> Result<(), String> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    std::fs::write(path, hooks::SCRIPT).map_err(|e| format!("Couldn't install the hook script: {e}"))
+    std::fs::write(path, hooks::SCRIPT).map_err(|e| format!("Couldn't install the hook script: {e}"))?;
+    std::fs::write(statusline_path(path), hooks::STATUSLINE_SCRIPT).map_err(|e| format!("Couldn't install the status-line script: {e}"))
 }
 
 #[tauri::command]
@@ -681,6 +718,7 @@ pub fn run() {
                 replies: actions::Replies::default(),
                 states: Mutex::new(HashMap::new()),
                 script_path,
+                claude_limits_path: data.join("claude-limits.json"),
                 settings: Mutex::new(settings::load(&data.join("settings.json"))),
                 settings_path: data.join("settings.json"),
                 approvals: approvals.clone(),

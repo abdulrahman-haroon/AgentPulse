@@ -47,6 +47,8 @@ pub struct Request {
     pub output: u64,
     pub cost: Option<f64>,
     pub cache_saved: f64,
+    /// GitHub AI credits this request used (Copilot only; 0 for other agents).
+    pub ai_credits: f64,
 }
 
 /// Where a session lives and how its last reply ended.
@@ -87,14 +89,20 @@ pub struct SubAgent {
     pub cost: f64,
 }
 
-/// Plan usage reported by the agent itself (Codex logs its rate limits). Real numbers, not estimates.
-#[derive(Debug, Clone, Serialize, PartialEq)]
+/// Plan usage. Reported by the agent itself (Codex logs, Claude Code's status line) unless
+/// `estimate` is set (Copilot: logged credits against the plan the user picked).
+#[derive(Debug, Clone, Serialize, PartialEq, Default)]
 pub struct PlanLimit {
     pub provider: Provider,
     /// "5-hour", "Weekly", ...
     pub window: String,
     pub used_percent: f64,
     pub resets_at: Option<String>,
+    /// e.g. "4,210 of 7,000 credits" or "$314 of $500".
+    pub detail: Option<String>,
+    /// When the agent last reported this number (None = computed just now).
+    pub as_of: Option<String>,
+    pub estimate: bool,
 }
 
 pub const MAX_PROMPT_CHARS: usize = 300;
@@ -264,6 +272,7 @@ impl FileData {
             output: t.output,
             cost: pricing::cost(&model, &t, fast),
             cache_saved: pricing::cache_savings(&model, &t, fast),
+            ai_credits: 0.0,
             model,
         };
         self.push_request(req);
@@ -425,7 +434,12 @@ impl LogCache {
     pub fn limits(&self, now: Timestamp) -> Vec<PlanLimit> {
         let newest = self.files.values().filter_map(|f| f.data.limits.as_ref()).max_by_key(|(ts, _)| *ts);
         newest
-            .map(|(_, l)| l.iter().filter(|l| l.resets_at.as_deref().and_then(|t| t.parse::<Timestamp>().ok()).is_none_or(|t| t > now)).cloned().collect())
+            .map(|(at, l)| {
+                l.iter()
+                    .filter(|l| l.resets_at.as_deref().and_then(|t| t.parse::<Timestamp>().ok()).is_none_or(|t| t > now))
+                    .map(|l| PlanLimit { as_of: Some(at.to_string()), ..l.clone() })
+                    .collect()
+            })
             .unwrap_or_default()
     }
 }

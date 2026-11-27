@@ -3,23 +3,33 @@ import type { DayPoint, NameValue, PlanLimit } from "../api";
 import { dayLabel, duration, money, moneyTick, tokens, weekdayLabel } from "../format";
 import { providerName } from "./Agents";
 
-/** Plan usage an agent reports about itself (Codex logs it), so these are real numbers. */
+/** Plan usage: Codex and Claude Code report their own (real numbers, as of their last update);
+ *  Copilot's is an estimate from this computer's logs against the plan picked in Settings. */
 /** `bare`: inside an agent's own group, so the window alone is the label. */
 export function LimitBars({ limits, now, bare = false }: { limits: PlanLimit[]; now: number; bare?: boolean }) {
   return (
     <ul className="limits">
       {limits.map((l) => {
         const level = l.used_percent >= 90 ? "limit-high" : l.used_percent >= 70 ? "limit-mid" : "";
+        const age = l.as_of ? now - new Date(l.as_of).getTime() : 0;
+        const notes = [
+          l.detail,
+          l.resets_at && `resets in ${duration(new Date(l.resets_at).getTime() - now)}`,
+          age > 5 * 60_000 && `updated ${duration(age)} ago`,
+        ].filter(Boolean);
         return (
           <li key={`${l.provider}-${l.window}`}>
             <div className="limit-row">
-              <span>{bare ? l.window : `${providerName(l.provider)} · ${l.window}`}</span>
-              <span className="limit-value">{Math.round(l.used_percent)}%</span>
+              <span>
+                {bare ? l.window : `${providerName(l.provider)} · ${l.window}`}
+                {l.estimate && <span className="limit-estimate" title="Estimated from this computer's logs and the plan you picked in Settings"> · estimate</span>}
+              </span>
+              <span className="limit-value">{l.estimate ? "~" : ""}{Math.round(l.used_percent)}%</span>
             </div>
-            <div className="track" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(l.used_percent)} aria-label={`${providerName(l.provider)} ${l.window} limit used`}>
+            <div className="track" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(l.used_percent)} aria-label={`${providerName(l.provider)} ${l.window} limit used${l.estimate ? " (estimate)" : ""}`}>
               <div className={`track-fill ${level}`} style={{ width: `${Math.max(1, l.used_percent)}%` }} />
             </div>
-            {l.resets_at && <span className="limit-reset">resets in {duration(new Date(l.resets_at).getTime() - now)}</span>}
+            {notes.length > 0 && <span className="limit-reset">{notes.join(" · ")}</span>}
           </li>
         );
       })}

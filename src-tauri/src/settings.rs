@@ -74,10 +74,34 @@ impl SoundSettings {
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(default)]
+pub struct LimitSettings {
+    /// Copilot plan, for the monthly AI-credit bar: "" (off), "pro", "pro_plus", "max", "custom".
+    pub copilot_plan: String,
+    /// Monthly AI credits when the plan is "custom" (e.g. a Business seat's budget).
+    pub copilot_custom_credits: u64,
+}
+
+impl LimitSettings {
+    /// Included monthly AI credits (base + flex) per GitHub's individual plans table,
+    /// docs.github.com "Usage-based billing for individuals", checked 2026-11-27.
+    pub fn copilot_allowance(&self) -> Option<u64> {
+        match self.copilot_plan.as_str() {
+            "pro" => Some(1_500),
+            "pro_plus" => Some(7_000),
+            "max" => Some(20_000),
+            "custom" if self.copilot_custom_credits > 0 => Some(self.copilot_custom_credits),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
 pub struct Settings {
     pub push: PushSettings,
     pub approvals: ApprovalSettings,
     pub sound: SoundSettings,
+    pub limits: LimitSettings,
 }
 
 pub fn validate_push(p: &PushSettings) -> Result<(), String> {
@@ -98,6 +122,12 @@ pub fn validate(s: &Settings) -> Result<(), String> {
     }
     if !(15..=MAX_APPROVAL_WAIT).contains(&s.approvals.wait_seconds) {
         return Err(format!("Approval wait must be between 15 and {MAX_APPROVAL_WAIT} seconds."));
+    }
+    if !["", "pro", "pro_plus", "max", "custom"].contains(&s.limits.copilot_plan.as_str()) {
+        return Err("Unknown Copilot plan.".into());
+    }
+    if s.limits.copilot_plan == "custom" && !(1..=10_000_000).contains(&s.limits.copilot_custom_credits) {
+        return Err("Enter your monthly AI credits (a whole number above 0).".into());
     }
     Ok(())
 }
@@ -148,6 +178,17 @@ mod tests {
         let quiet = SoundSettings { on_done: false, ..Default::default() };
         assert!(!quiet.wanted(AlertKind::Done) && quiet.wanted(AlertKind::NeedsYou));
         assert!(!SoundSettings { enabled: false, ..Default::default() }.wanted(AlertKind::NeedsYou));
+    }
+
+    #[test]
+    fn copilot_plan_allowance_and_validation() {
+        let plan = |p: &str, c| Settings { limits: LimitSettings { copilot_plan: p.into(), copilot_custom_credits: c }, ..Default::default() };
+        assert_eq!(Settings::default().limits.copilot_allowance(), None);
+        assert_eq!(plan("pro_plus", 0).limits.copilot_allowance(), Some(7_000));
+        assert_eq!(plan("custom", 3_000).limits.copilot_allowance(), Some(3_000));
+        assert!(validate(&plan("custom", 3_000)).is_ok());
+        assert!(validate(&plan("custom", 0)).is_err());
+        assert!(validate(&plan("enterprise-ultra", 0)).is_err());
     }
 
     #[test]

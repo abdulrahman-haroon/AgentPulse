@@ -26,7 +26,11 @@ jobs:
       # with the same Windows PowerShell 5.1 that users' hooks run under.
       - name: Hook script tests
         shell: powershell
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File hooks/test-notify.ps1
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File hooks/test-notify.ps1
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          powershell -NoProfile -ExecutionPolicy Bypass -File hooks/test-statusline.ps1
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
