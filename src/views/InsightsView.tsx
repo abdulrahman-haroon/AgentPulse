@@ -55,13 +55,20 @@ export function InsightsView({ data }: { data: Dashboard }) {
         />
       </section>
 
-      <section className="card">
-        <h2 className="card-title">Models today</h2>
-        <RankedBars items={data.models_today.map((m) => ({ ...m, name: m.name.replace(/^claude-/, "") }))} empty="No usage yet today." />
-      </section>
+      <div className="two-col">
+        <section className="card">
+          <h2 className="card-title">Models today</h2>
+          <RankedBars items={data.models_today.map((m) => ({ ...m, name: m.name.replace(/^claude-/, "") }))} empty="No usage yet today." />
+        </section>
+        <section className="card">
+          <h2 className="card-title">Agents today</h2>
+          <RankedBars items={data.providers_today} empty="No usage yet today." />
+        </section>
+      </div>
 
       <p className="footnote">
-        Costs are what these tokens would cost at Anthropic API prices. Pro and Max plans aren't billed per token.
+        Costs are what these tokens would cost at API prices (Anthropic for Claude, OpenAI for Codex). Subscription
+        plans aren't billed per token, and Copilot bills per request, so its sessions show tokens but no cost.
       </p>
     </>
   );

@@ -1,7 +1,14 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "widget",
-  "description": "Floating widget: read the dashboard, hide itself, and be dragged by its title area.",
+  "description": "Floating widget: read the dashboard, answer approvals, open the dashboard, hide itself, be dragged and fit its content.",
   "windows": ["widget"],
-  "permissions": ["allow-dashboard", "allow-toggle-widget", "core:window:allow-start-dragging"]
+  "permissions": [
+    "allow-dashboard",
+    "allow-toggle-widget",
+    "allow-open-dashboard",
+    "allow-decide-permission",
+    "core:window:allow-start-dragging",
+    "core:window:allow-set-size"
+  ]
 }

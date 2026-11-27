@@ -214,15 +214,13 @@ fn read_range(path: &PathBuf, from: u64, to: u64) -> Option<Vec<u8>> {
     Some(buf)
 }
 
-/// Tails the events file forever. `on_alert` runs for each new alert (not for replayed history);
-/// `on_change` runs after any state change (e.g. to update the tray).
+/// Tails the events file forever. `on_alert` runs for each new alert (not for replayed history).
 pub fn spawn_watcher(
     app: AppHandle,
     path: PathBuf,
     store: LiveStore,
     approvals: Approvals,
     on_alert: impl Fn(&AppHandle, &Alert) + Send + 'static,
-    on_change: impl Fn(&AppHandle, &HashMap<String, Live>) + Send + 'static,
 ) {
     std::thread::spawn(move || {
         if let Some(dir) = path.parent() {
@@ -240,7 +238,6 @@ pub fn spawn_watcher(
                     apply_approval(&mut ap, &e, Timestamp::now()); // expired ones are dropped
                 }
             }
-            on_change(&app, &s);
         }
         let mut offset = len;
         if offset > MAX_FILE_BYTES && OpenOptions::new().write(true).open(&path).and_then(|f| f.set_len(0)).is_ok() {
@@ -272,7 +269,6 @@ pub fn spawn_watcher(
                     alerts.extend(apply(&mut s, &e, Timestamp::now()));
                     apply_approval(&mut ap, &e, Timestamp::now());
                 }
-                on_change(&app, &s);
             }
             for a in &alerts {
                 on_alert(&app, a);

@@ -1,12 +1,20 @@
 import { useEffect, useState } from "react";
 import {
   connectHooks, disconnectHooks, getAutostart, getSettings, saveSettings, setAutostart,
-  type HookStatus, type Settings, type UpdateInfo,
+  type HookStatus, type Settings, type Source, type UpdateInfo,
 } from "../api";
 import { AlertIcon, CheckIcon } from "../components/Icons";
 import { UpdatesCard } from "../components/UpdatesCard";
 import { PhoneCard } from "../components/PhoneCard";
 import { ApprovalsSettingsCard } from "../components/ApprovalsSettingsCard";
+import { SoundCard } from "../components/SoundCard";
+import { ProviderTag } from "../components/Agents";
+
+const HOW: Record<string, string> = {
+  claude: "Hooks + session logs: exact live states, approvals, cost, sub-agents.",
+  codex: "Session logs: live state, cost estimate, and your real plan usage (5-hour and weekly limits).",
+  copilot: "Session logs: live state, Needs you when it asks for permission, finished alerts, tokens and sub-agents. No cost: Copilot bills per premium request.",
+};
 
 const WHAT: Record<string, string> = {
   SessionStart: "a session opens",
@@ -17,9 +25,9 @@ const WHAT: Record<string, string> = {
   SessionEnd: "a session closes",
 };
 
-type Props = { status: HookStatus | null; setStatus: (s: HookStatus) => void; recheck: () => void; update: UpdateInfo | null };
+type Props = { status: HookStatus | null; setStatus: (s: HookStatus) => void; recheck: () => void; update: UpdateInfo | null; sources: Source[] };
 
-export function SetupView({ status, setStatus, recheck, update }: Props) {
+export function SetupView({ status, setStatus, recheck, update, sources }: Props) {
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -51,6 +59,32 @@ export function SetupView({ status, setStatus, recheck, update }: Props) {
 
   return (
     <>
+      {sources.length > 0 && (
+        <section className="card">
+          <div className="card-head">
+            <h2 className="card-title">Connected agents</h2>
+            <span className="muted">{sources.filter((x) => x.found).length} of {sources.length} found on this computer</span>
+          </div>
+          <p className="muted">
+            AgentPulse reads each agent's local session logs (read-only) as soon as they exist. Nothing to set up:
+            install an agent, use it once, and it appears on the Live board.
+          </p>
+          <ul className="sources">
+            {sources.map((x) => (
+              <li key={x.provider} className={x.found ? "ok" : "missing"}>
+                <ProviderTag provider={x.provider} />
+                <span className="source-main">
+                  <strong>{x.label}</strong>
+                  <span className="muted">{HOW[x.provider]}</span>
+                  <code className="source-path" title={x.path}>{x.path}</code>
+                </span>
+                <span className={`pill ${x.found ? "pill-ok" : "pill-off"}`}>{x.found ? <><CheckIcon /> Found</> : "Not installed"}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <section className="card">
         <div className="card-head">
           <h2 className="card-title">Claude Code hooks</h2>
@@ -121,6 +155,7 @@ export function SetupView({ status, setStatus, recheck, update }: Props) {
 
       {settings && (
         <>
+          <SoundCard sound={settings.sound} save={(sound) => savePart({ sound })} />
           <ApprovalsSettingsCard
             approvals={settings.approvals}
             save={(approvals) => savePart({ approvals })}
@@ -136,7 +171,7 @@ export function SetupView({ status, setStatus, recheck, update }: Props) {
         <h2 className="card-title">Privacy</h2>
         <ul className="plain">
           <li>Everything stays on this computer. No accounts, servers, or telemetry. Network requests happen only for the update check to GitHub (optional) and phone notifications (off unless you turn them on).</li>
-          <li>Claude Code logs are only read. The only file AgentPulse ever changes is settings.json, when you click Connect or Disconnect.</li>
+          <li>Agent logs (Claude Code, Codex, Copilot) are only read. The only file AgentPulse ever changes outside its own folder is Claude Code's settings.json, when you click Connect or Disconnect.</li>
           <li>No network ports are opened; hooks talk to the app through a local file.</li>
         </ul>
       </section>

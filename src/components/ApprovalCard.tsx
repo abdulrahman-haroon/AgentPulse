@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { decidePermission, type Approval } from "../api";
 import { AlertIcon } from "./Icons";
 
-/** A permission prompt held open by the hook. Shows the full tool input; nothing is pre-selected. */
-export function ApprovalCard({ a }: { a: Approval }) {
+/** A permission prompt held open by the hook. Shows the full tool input; nothing is pre-selected.
+ *  Compact (floating widget): same request and buttons, no deny reason. */
+export function ApprovalCard({ a, compact = false }: { a: Approval; compact?: boolean }) {
   const [now, setNow] = useState(Date.now());
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
@@ -26,10 +27,10 @@ export function ApprovalCard({ a }: { a: Approval }) {
   };
 
   return (
-    <article className="approval" aria-label={`Approval needed: ${a.tool_name}`}>
+    <article className={`approval ${compact ? "approval-compact" : ""}`} aria-label={`Approval needed: ${a.tool_name}`}>
       <header className="approval-head">
         <span className="badge badge-needs_you"><AlertIcon /> Approval needed</span>
-        <span className="session-time">{left > 0 ? `falls back to Claude Code in ${left}s` : "answer it in Claude Code"}</span>
+        <span className="session-time">{left > 0 ? (compact ? `${left}s` : `falls back to Claude Code in ${left}s`) : "answer it in Claude Code"}</span>
       </header>
       <p className="approval-who">
         <strong>{a.session_title}</strong> <span className="muted">· {a.project}</span>
@@ -43,14 +44,14 @@ export function ApprovalCard({ a }: { a: Approval }) {
         <pre>{a.detail}</pre>
       </details>
       <div className="approval-actions">
-        <input
+        {!compact && <input
           className="text"
           placeholder="Reason for denying (optional, Claude sees it)"
           value={reason}
           maxLength={500}
           onChange={(e) => setReason(e.target.value)}
           disabled={busy || left === 0}
-        />
+        />}
         <button className="danger" disabled={busy || left === 0} onClick={() => decide(false)}>Deny</button>
         <button className="primary" disabled={busy || left === 0} onClick={() => decide(true)}>Allow once</button>
       </div>

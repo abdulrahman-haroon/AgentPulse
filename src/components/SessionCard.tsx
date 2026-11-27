@@ -3,6 +3,7 @@ import { cancelReply, dismissReply, openSession, sendReply, type PermissionMode,
 import { money, since } from "../format";
 import { StatusBadge } from "./StatusBadge";
 import { SpinIcon } from "./Icons";
+import { AgentChip, AgentList, ProviderTag } from "./Agents";
 
 const MODES: { id: PermissionMode; label: string; hint: string }[] = [
   { id: "default", label: "Ask first", hint: "Uses your Claude Code permission rules; anything that would need approval is skipped." },
@@ -17,6 +18,7 @@ function timeLabel(s: Session, now: number) {
 }
 
 function openLabel(s: Session) {
+  if (s.provider !== "claude") return null; // Open/Reply drive the `claude` command only
   if (s.entrypoint.includes("vscode")) return "Open in VS Code";
   return s.state === "working" || s.state === "needs_you" ? null : "Resume in terminal";
 }
@@ -58,7 +60,7 @@ export function SessionCard({ s, reply, now }: { s: Session; reply?: Reply; now:
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const canReply = (s.state === "done" || s.state === "idle") && reply?.status !== "running";
+  const canReply = s.provider === "claude" && (s.state === "done" || s.state === "idle") && reply?.status !== "running";
   const open = openLabel(s);
 
   const run = async (f: () => Promise<unknown>) => {
@@ -86,20 +88,23 @@ export function SessionCard({ s, reply, now }: { s: Session; reply?: Reply; now:
     <article className={`session session-${s.state}`}>
       <header className="session-head">
         <StatusBadge state={s.state} />
+        <ProviderTag provider={s.provider} />
+        <AgentChip running={s.agents_running} total={s.agents_total} />
         <span className="session-time">{timeLabel(s, now)}</span>
       </header>
       <h3 className="session-title" title={s.title}>{s.title}</h3>
       <p className="session-meta">
         <span>{s.project || "unknown project"}</span>
         {s.model && <span>{s.model.replace(/^claude-/, "")}</span>}
-        <span>{s.entrypoint.includes("vscode") ? "VS Code" : "terminal"}</span>
+        {s.provider === "claude" && <span>{s.entrypoint.includes("vscode") ? "VS Code" : "terminal"}</span>}
       </p>
       {s.state === "needs_you" && s.message && <p className="session-message">{s.message}</p>}
+      <AgentList agents={s.agents} total={s.agents_total} now={now} />
 
       <footer className="session-foot">
         <span>
-          <span className="session-cost">{money(s.cost)}</span>
-          <span className="muted"> · {s.requests} requests</span>
+          <span className="session-cost">{s.provider === "copilot" ? "—" : money(s.cost)}</span>
+          <span className="muted"> · {s.requests} {s.requests === 1 ? "request" : "requests"}</span>
         </span>
         <span className="session-actions">
           {open && <button className="ghost" disabled={busy} onClick={() => run(() => openSession(s.id))}>{open}</button>}

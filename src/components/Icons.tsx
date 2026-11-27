@@ -18,3 +18,11 @@ export const CheckIcon = ({ size = 14 }: P) => svg(size, <path d="M5 12.5l4.5 4.
 export const AlertIcon = ({ size = 14 }: P) => svg(size, <><path d="M12 8v5" /><path d="M12 16.5v.5" /><circle cx="12" cy="12" r="9" /></>);
 export const SpinIcon = ({ size = 14 }: P) => svg(size, <path d="M12 3a9 9 0 1 0 9 9" />);
 export const MoonIcon = ({ size = 14 }: P) => svg(size, <path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z" />);
+/** Sub-agents: one session branching into helpers. */
+export const AgentsIcon = ({ size = 14 }: P) => svg(size, <><circle cx="12" cy="5" r="2.5" /><circle cx="5" cy="19" r="2.5" /><circle cx="19" cy="19" r="2.5" /><path d="M12 7.5v4M12 11.5l-5.5 5M12 11.5l5.5 5" /></>);
+export const SlidersIcon = ({ size = 18 }: P) => svg(size, <><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1" /><circle cx="15" cy="6" r="2" /><circle cx="9" cy="12" r="2" /><circle cx="17" cy="18" r="2" /></>);
+export const VolumeIcon = ({ size = 14 }: P) => svg(size, <><path d="M11 5L6 9H3v6h3l5 4z" /><path d="M15.5 8.5a5 5 0 0 1 0 7" /><path d="M18.5 5.5a9 9 0 0 1 0 13" /></>);
+export const ExternalIcon = ({ size = 14 }: P) => svg(size, <><path d="M14 4h6v6" /><path d="M20 4l-9 9" /><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5" /></>);
+export const ChevronIcon = ({ size = 14, up = false }: P & { up?: boolean }) => svg(size, <path d={up ? "M6 15l6-6 6 6" : "M6 9l6 6 6-6"} />);
+export const PlayIcon = ({ size = 12 }: P) => svg(size, <path d="M7 5l12 7-12 7z" />);
+export const GaugeIcon = ({ size = 14 }: P) => svg(size, <><path d="M4.5 17a8.5 8.5 0 1 1 15 0" /><path d="M12 13l4-4" /></>);

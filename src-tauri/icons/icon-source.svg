@@ -1,17 +1,29 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
-  <!-- AgentPulse app icon source. Regenerate all sizes with: npx tauri icon src-tauri/icons/icon-source.svg -->
+  <!-- AgentPulse app icon source. Regenerate all sizes with: npx tauri icon src-tauri/icons/icon-source.svg
+       The pulse points match tray_icon() in src-tauri/src/lib.rs and Logo.tsx (x32 scale). -->
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#5598e7"/>
-      <stop offset="1" stop-color="#184f95"/>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#232850"/>
+      <stop offset="1" stop-color="#0b0d1c"/>
     </linearGradient>
-    <linearGradient id="shine" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#ffffff" stop-opacity="0.18"/>
-      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0"/>
+    <radialGradient id="halo" cx="0.5" cy="0.55" r="0.5">
+      <stop offset="0" stop-color="#7c6cff" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#7c6cff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="line" x1="176" y1="0" x2="848" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="0.5" stop-color="#818cf8"/>
+      <stop offset="1" stop-color="#e879f9"/>
     </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="26"/>
+    </filter>
   </defs>
-  <rect x="64" y="64" width="896" height="896" rx="208" fill="url(#bg)"/>
-  <rect x="64" y="64" width="896" height="896" rx="208" fill="url(#shine)"/>
-  <path d="M208 532 H384 L452 352 L572 712 L640 532 H816" fill="none" stroke="#ffffff" stroke-width="72" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="816" cy="532" r="44" fill="#fab219"/>
+  <rect x="64" y="64" width="896" height="896" rx="224" fill="url(#tile)"/>
+  <rect x="67" y="67" width="890" height="890" rx="221" fill="none" stroke="#ffffff" stroke-opacity="0.09" stroke-width="6"/>
+  <rect x="64" y="64" width="896" height="896" rx="224" fill="url(#halo)"/>
+  <path d="M176 560 H352 L432 288 L592 768 L672 560 H800" fill="none" stroke="url(#line)" stroke-width="96" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)" opacity="0.7"/>
+  <path d="M176 560 H352 L432 288 L592 768 L672 560 H800" fill="none" stroke="url(#line)" stroke-width="88" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="824" cy="560" r="78" fill="#e879f9" opacity="0.45" filter="url(#glow)"/>
+  <circle cx="824" cy="560" r="62" fill="#fdf4ff"/>
 </svg>

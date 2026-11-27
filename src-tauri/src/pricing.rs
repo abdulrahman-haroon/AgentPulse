@@ -62,6 +62,47 @@ pub fn cost(model: &str, t: &Tokens, fast: bool) -> Option<f64> {
     Some(if fast { usd * 2.0 } else { usd })
 }
 
+/// OpenAI models used by Codex: (model id, input, cached input, output), standard tier,
+/// prompts up to 272K tokens. Source: developers.openai.com/api/docs/pricing, checked 2026-11-27
+/// (gpt-5-codex / gpt-5.1-codex from their model pages: same rates as gpt-5).
+const OPENAI: &[(&str, f64, f64, f64)] = &[
+    ("gpt-5.6-sol", 4.0, 0.40, 20.0),
+    ("gpt-5.6-terra", 2.0, 0.20, 12.0),
+    ("gpt-5.6-luna", 0.20, 0.02, 1.20),
+    ("gpt-5.5", 5.0, 0.50, 30.0),
+    ("gpt-5.4", 2.50, 0.25, 15.0),
+    ("gpt-5.4-mini", 0.75, 0.075, 4.50),
+    ("gpt-5.4-nano", 0.20, 0.02, 1.25),
+    ("gpt-5.3-codex", 1.75, 0.175, 14.0),
+    ("gpt-5.2", 1.75, 0.175, 14.0),
+    ("gpt-5.1", 1.25, 0.125, 10.0),
+    ("gpt-5.1-codex", 1.25, 0.125, 10.0),
+    ("gpt-5", 1.25, 0.125, 10.0),
+    ("gpt-5-codex", 1.25, 0.125, 10.0),
+    ("gpt-5-mini", 0.25, 0.025, 2.0),
+    ("gpt-5-nano", 0.05, 0.005, 0.40),
+];
+/// These models bill prompts over 272K tokens at 2x input and 1.5x output (same source).
+const OPENAI_LONG: &[&str] = &["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4"];
+
+/// Exact id or a dated snapshot ("gpt-5-2025-08-07"); never a different variant like "-mini".
+fn openai_price(model: &str, prompt: u64) -> Option<Price> {
+    let (id, input, cached, output) = *OPENAI.iter().find(|(id, ..)| model == *id || model.strip_prefix(id).is_some_and(|rest| rest.starts_with("-20")))?;
+    let long = prompt > 272_000 && OPENAI_LONG.contains(&id);
+    Some(if long { Price { input: input * 2.0, output: output * 1.5, cache_read: cached * 2.0 } } else { Price { input, output, cache_read: cached } })
+}
+
+/// Estimated USD for one Codex response. OpenAI counts cached tokens inside `input`.
+pub fn openai_cost(model: &str, input: u64, cached: u64, output: u64) -> Option<f64> {
+    let p = openai_price(model, input)?;
+    let fresh = input.saturating_sub(cached);
+    Some((fresh as f64 * p.input + cached as f64 * p.cache_read + output as f64 * p.output) / 1_000_000.0)
+}
+
+pub fn openai_cache_savings(model: &str, input: u64, cached: u64) -> f64 {
+    openai_price(model, input).map_or(0.0, |p| cached.min(input) as f64 * (p.input - p.cache_read) / 1_000_000.0)
+}
+
 /// USD saved because cache reads were billed below the full input price.
 pub fn cache_savings(model: &str, t: &Tokens, fast: bool) -> f64 {
     let prompt = t.input + t.cache_read + t.cache_write_5m + t.cache_write_1h;
@@ -101,6 +142,20 @@ mod tests {
         let s = cache_savings("claude-opus-5-5", &t(0, 0, 1_000_000, 0, 0), false);
         assert!((s - 3.80).abs() < 1e-9);
         assert_eq!(cache_savings("<synthetic>", &t(0, 0, 1_000_000, 0, 0), false), 0.0);
+    }
+
+    #[test]
+    fn openai_prices_match_exact_ids_and_snapshots_only() {
+        // 1M fresh input + 1M cached (inside input) + 1M output on gpt-5: 1.25 + 0.125 + 10
+        let c = openai_cost("gpt-5", 2_000_000 - 1, 1_000_000 - 1, 1_000_000).unwrap();
+        assert!((c - 11.375).abs() < 1e-4, "{c}");
+        assert!(openai_cost("gpt-5-2025-08-07", 1, 0, 0).is_some());
+        assert!(openai_cost("gpt-5.1-codex-mini", 1, 0, 0).is_none()); // not priced as gpt-5.1-codex
+        assert!(openai_cost("claude-opus-5-5", 1, 0, 0).is_none());
+        // long prompts on gpt-5.5: 2x input
+        let long = openai_cost("gpt-5.5", 300_000, 0, 0).unwrap();
+        assert!((long - 3.0).abs() < 1e-9, "{long}");
+        assert!((openai_cache_savings("gpt-5", 1_000_000, 1_000_000) - 1.125).abs() < 1e-9);
     }
 
     #[test]

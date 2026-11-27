@@ -5,6 +5,22 @@ import { invoke } from "@tauri-apps/api/core";
 export type NameValue = { name: string; cost: number; tokens: number };
 export type DayPoint = { date: string; cost: number; tokens: number };
 export type SessionState = "working" | "needs_you" | "done" | "idle";
+export type Provider = "claude" | "codex" | "copilot";
+/** A sub-agent (Claude Code Task/Agent tool, Copilot subagent) working for a session. */
+export type Agent = {
+  id: string;
+  kind: string;
+  description: string;
+  background: boolean;
+  running: boolean;
+  started: string | null;
+  last_active: string | null;
+  cost: number;
+  model: string;
+};
+/** Plan usage an agent reports about itself (Codex). Real numbers, not estimates. */
+export type PlanLimit = { provider: Provider; window: string; used_percent: number; resets_at: string | null };
+export type Source = { provider: Provider; label: string; path: string; found: boolean };
 export type Session = {
   id: string;
   title: string;
@@ -20,6 +36,11 @@ export type Session = {
   model: string;
   /** "cli", "claude-vscode", ... */
   entrypoint: string;
+  provider: Provider;
+  /** Running first, then the most recent finished ones. */
+  agents: Agent[];
+  agents_running: number;
+  agents_total: number;
 };
 export type Reply = {
   session_id: string;
@@ -58,6 +79,10 @@ export type Dashboard = {
   working: number;
   replies: Reply[];
   approvals: Approval[];
+  agents_running: number;
+  limits: PlanLimit[];
+  providers_today: NameValue[];
+  sources: Source[];
 };
 // Mirrors stats::SessionRow.
 export type SessionRow = {
@@ -73,6 +98,7 @@ export type SessionRow = {
   model: string;
   entrypoint: string;
   last_prompt: string;
+  provider: Provider;
 };
 export const sessionHistory = () => invoke<SessionRow[]>("session_history");
 
@@ -115,6 +141,8 @@ export function useDashboard(intervalMs: number) {
 }
 
 export const toggleWidget = () => invoke("toggle_widget");
+export const openDashboard = () => invoke("open_dashboard");
+export const testSound = (kind: "done" | "needs_you") => invoke("test_sound", { kind });
 export const openSession = (id: string) => invoke("open_session", { id });
 export const sendReply = (id: string, message: string, mode: PermissionMode) => invoke("send_reply", { id, message, mode });
 export const cancelReply = (id: string) => invoke("cancel_reply", { id });
@@ -154,7 +182,8 @@ export type PushSettings = {
   include_details: boolean;
 };
 export type ApprovalSettings = { enabled: boolean; wait_seconds: number };
-export type Settings = { push: PushSettings; approvals: ApprovalSettings };
+export type SoundSettings = { enabled: boolean; on_done: boolean; on_needs_you: boolean };
+export type Settings = { push: PushSettings; approvals: ApprovalSettings; sound: SoundSettings };
 export const decidePermission = (requestId: string, allow: boolean, reason: string) =>
   invoke("decide_permission", { requestId, allow, reason });
 export const getSettings = () => invoke<Settings>("get_settings");

@@ -1,25 +1,31 @@
 mod actions;
+mod codex;
+mod copilot;
 mod events;
 mod hooks;
 mod logs;
 mod pricing;
 mod push;
 mod settings;
+mod sound;
 mod stats;
 
+use events::{AlertKind, LiveStore, State};
 use jiff::{SignedDuration, Timestamp, ZonedDateTime};
-use events::{Live, LiveStore, State};
+use logs::Provider;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem};
-use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, State as TauriState, WindowEvent};
 
 struct AppState {
     claude_dir: PathBuf,
+    /// Log folders of every supported agent.
+    roots: Vec<(PathBuf, Provider)>,
     cache: Mutex<logs::LogCache>,
     live: LiveStore,
     replies: actions::Replies,
@@ -32,6 +38,8 @@ struct AppState {
     approvals: events::Approvals,
     /// Where answers to permission prompts are dropped for the waiting hook script.
     decisions_dir: PathBuf,
+    /// Exists while the floating widget is on, so it comes back after a restart.
+    widget_flag: PathBuf,
 }
 
 /// Answers a permission prompt that the hook is holding open. Only requests the hook actually
@@ -59,7 +67,7 @@ fn save_settings(state: TauriState<'_, AppState>, settings: settings::Settings) 
 async fn test_push(push: settings::PushSettings) -> Result<(), String> {
     settings::validate_push(&push)?;
     let sample = events::Alert {
-        kind: events::AlertKind::NeedsYou,
+        kind: AlertKind::NeedsYou,
         project: "AgentPulse".into(),
         title: "AgentPulse test".into(),
         body: "Phone notifications are working.".into(),
@@ -70,15 +78,24 @@ async fn test_push(push: settings::PushSettings) -> Result<(), String> {
     push::send(&push, &body).await
 }
 
-/// Desktop notification for every alert; phone push if the user turned it on.
+/// Plays an alert chime so the user can hear it (Settings → "Play").
+#[tauri::command]
+fn test_sound(kind: String) {
+    sound::play(if kind == "needs_you" { AlertKind::NeedsYou } else { AlertKind::Done });
+}
+
+/// Desktop notification and chime for every alert; phone push if the user turned it on.
 fn on_alert(app: &AppHandle, alert: &events::Alert) {
     use tauri_plugin_notification::NotificationExt;
     let _ = app.notification().builder().title(&alert.title).body(&alert.body).show();
-    let push = app.state::<AppState>().settings.lock().map(|s| s.push.clone()).unwrap_or_default();
-    if push::wanted(&push, alert) {
-        let body = push::payload(&push, alert);
+    let s = app.state::<AppState>().settings.lock().map(|s| s.clone()).unwrap_or_default();
+    if s.sound.wanted(alert.kind) {
+        sound::play(alert.kind);
+    }
+    if push::wanted(&s.push, alert) {
+        let body = push::payload(&s.push, alert);
         tauri::async_runtime::spawn(async move {
-            if let Err(e) = push::send(&push, &body).await {
+            if let Err(e) = push::send(&s.push, &body).await {
                 eprintln!("[agentpulse] phone push failed: {e}");
             }
         });
@@ -96,10 +113,13 @@ async fn blocking<T: Send + 'static>(
 }
 
 /// A session's folder/entrypoint/model (from our own log cache, never from the UI) and
-/// whether it's currently running.
+/// whether it's currently running. Only Claude Code sessions can be opened or replied to.
 fn session_info(state: &AppState, id: &str) -> Result<(logs::SessionMeta, bool), String> {
     let cache = state.cache.lock().map_err(|e| e.to_string())?;
     let meta = cache.meta().get(id).map(|m| (*m).clone()).ok_or("Unknown session.")?;
+    if meta.provider != Provider::Claude {
+        return Err(format!("Open and Reply work with Claude Code sessions only. Switch to {} for this one.", meta.provider.label()));
+    }
     let running = state
         .states
         .lock()
@@ -149,11 +169,18 @@ async fn dashboard(app: AppHandle) -> Result<stats::Dashboard, String> {
         let mut cache = state.cache.lock().map_err(|e| e.to_string())?;
         refresh(state, &mut cache);
         let live = state.live.lock().map_err(|e| e.to_string())?.clone();
-        let mut d = stats::build(cache.requests(), &cache.titles(), &cache.meta(), &live, &ZonedDateTime::now());
+        let now = ZonedDateTime::now();
+        let mut d = stats::build(cache.requests(), &cache.titles(), &cache.meta(), &cache.agents(), &live, &now);
+        d.limits = cache.limits(now.timestamp());
         d.replies = state.replies.views();
         if let Ok(ap) = state.approvals.lock() {
             d.approvals = stats::approval_views(&ap, &cache.titles());
         }
+        d.sources = state
+            .roots
+            .iter()
+            .map(|(dir, p)| stats::SourceView { provider: *p, label: p.label(), path: dir.to_string_lossy().into_owned(), found: dir.is_dir() })
+            .collect();
         if let Ok(mut s) = state.states.lock() {
             *s = d.sessions.iter().map(|v| (v.id.clone(), v.state)).collect();
         }
@@ -175,9 +202,9 @@ async fn session_history(app: AppHandle) -> Result<Vec<stats::SessionRow>, Strin
 
 fn refresh(state: &AppState, cache: &mut logs::LogCache) {
     // One spare day so files touched just before the window's first midnight are included.
-    let since = SystemTime::now() - std::time::Duration::from_secs((stats::HISTORY_DAYS as u64 + 1) * 86_400);
+    let since = SystemTime::now() - Duration::from_secs((stats::HISTORY_DAYS as u64 + 1) * 86_400);
     let started = std::time::Instant::now();
-    cache.refresh(&state.claude_dir.join("projects"), since);
+    cache.refresh(&state.roots, since);
     if cfg!(debug_assertions) && started.elapsed().as_millis() > 200 {
         eprintln!("[agentpulse] log refresh took {:?}", started.elapsed());
     }
@@ -207,7 +234,7 @@ async fn hook_status(app: AppHandle) -> Result<HookInfo, String> {
     blocking(app, |s| hook_info(s, None)).await
 }
 
-/// Installs the hook script into AgentPulse's data folder and registers it for all five
+/// Installs the hook script into AgentPulse's data folder and registers it for all six
 /// events in settings.json (backed up first). Only our own entries are touched.
 #[tauri::command]
 async fn connect_hooks(app: AppHandle) -> Result<HookInfo, String> {
@@ -249,6 +276,11 @@ fn get_autostart(app: AppHandle) -> bool {
 #[tauri::command]
 fn set_autostart(app: AppHandle, enabled: bool) -> Result<bool, String> {
     use tauri_plugin_autostart::ManagerExt;
+    // A dev build loads its UI from the Vite dev server, which isn't running at sign-in, so it
+    // would start as a blank window. Only an installed (release) build may register itself.
+    if enabled && cfg!(debug_assertions) {
+        return Err("Start with Windows works in the installed app only. Dev builds need `npm run tauri dev` running.".into());
+    }
     let a = app.autolaunch();
     if enabled { a.enable() } else { a.disable() }.map_err(|e| e.to_string())?;
     a.is_enabled().map_err(|e| e.to_string())
@@ -267,7 +299,7 @@ fn app_version(app: AppHandle) -> String {
     app.package_info().version.to_string()
 }
 
-/// Asks GitHub Releases for a newer version. The only network call AgentPulse makes.
+/// Asks GitHub Releases for a newer version.
 #[tauri::command]
 async fn check_update(app: AppHandle) -> Result<UpdateInfo, String> {
     use tauri_plugin_updater::UpdaterExt;
@@ -295,8 +327,21 @@ const MINIMIZED_FLAG: &str = "--minimized";
 #[tauri::command]
 fn toggle_widget(app: AppHandle) {
     if let Some(w) = app.get_webview_window("widget") {
-        let _ = if w.is_visible().unwrap_or(false) { w.hide() } else { w.show() };
+        let show = !w.is_visible().unwrap_or(false);
+        let _ = if show { w.show() } else { w.hide() };
+        remember_widget(&app, show);
     }
+}
+
+fn remember_widget(app: &AppHandle, visible: bool) {
+    let flag = &app.state::<AppState>().widget_flag;
+    let _ = if visible { std::fs::write(flag, "") } else { std::fs::remove_file(flag) };
+}
+
+/// The widget's "open dashboard" button.
+#[tauri::command]
+fn open_dashboard(app: AppHandle) {
+    show_main(&app);
 }
 
 fn show_main(app: &AppHandle) {
@@ -307,41 +352,109 @@ fn show_main(app: &AppHandle) {
     }
 }
 
-/// A 32×32 filled circle; the tray icon is a status light.
-fn dot(rgb: [u8; 3]) -> Image<'static> {
-    const N: i32 = 32;
-    let mut px = Vec::with_capacity((N * N * 4) as usize);
+/// Distance from (px, py) to the segment a–b.
+fn seg_dist(px: f32, py: f32, a: (f32, f32), b: (f32, f32)) -> f32 {
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let t = (((px - a.0) * dx + (py - a.1) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
+    (px - a.0 - t * dx).hypot(py - a.1 - t * dy)
+}
+
+/// 32×32 tray icon: the AgentPulse mark (pulse line on a dark rounded square) with the line in the
+/// status color. Drawn here, so no image files or decoders are needed.
+fn tray_icon(line: [u8; 3]) -> Image<'static> {
+    const N: usize = 32;
+    const BG: [u8; 3] = [0x15, 0x18, 0x2b];
+    // The logo's pulse, in tray pixels (same shape as icons/icon-source.svg).
+    const PTS: [(f32, f32); 6] = [(5.5, 17.5), (11.0, 17.5), (13.5, 9.0), (18.5, 24.0), (21.0, 17.5), (26.5, 17.5)];
+    let mut px = Vec::with_capacity(N * N * 4);
     for y in 0..N {
         for x in 0..N {
-            let (dx, dy) = (x as f32 - 15.5, y as f32 - 15.5);
-            // 1px anti-aliased edge
-            let a = (13.0 - (dx * dx + dy * dy).sqrt()).clamp(0.0, 1.0);
-            px.extend_from_slice(&[rgb[0], rgb[1], rgb[2], (a * 255.0) as u8]);
+            let (cx, cy) = (x as f32 + 0.5, y as f32 + 0.5);
+            // Rounded square, corner radius 8, 1px anti-aliased edge.
+            let (qx, qy) = ((cx - 16.0).abs() - 8.0, (cy - 16.0).abs() - 8.0);
+            let edge = qx.max(0.0).hypot(qy.max(0.0)) + qx.max(qy).min(0.0) - 8.0;
+            let fill = (0.5 - edge).clamp(0.0, 1.0);
+            let dist = PTS.windows(2).map(|w| seg_dist(cx, cy, w[0], w[1])).fold(f32::MAX, f32::min);
+            let ink = (2.25 - dist).clamp(0.0, 1.0); // ~3.5px stroke
+            let c = |i: usize| (BG[i] as f32 * (1.0 - ink) + line[i] as f32 * ink) as u8;
+            px.extend_from_slice(&[c(0), c(1), c(2), (fill * 255.0) as u8]);
         }
     }
     Image::new_owned(px, N as u32, N as u32)
 }
 
-fn update_tray(app: &AppHandle, live: &HashMap<String, Live>) {
-    let Some(tray) = app.tray_by_id("main") else { return };
+const QUIET: [u8; 3] = [0x8b, 0x93, 0xa7];
+const WORKING: [u8; 3] = [0x38, 0xbd, 0xf8];
+const NEEDS_YOU: [u8; 3] = [0xfb, 0xbf, 0x24];
+
+/// Tray color + tooltip from hook states, log-only agents and running sub-agents.
+fn tray_status(live: &HashMap<String, events::Live>, logs: &HashMap<String, stats::LogState>, agent_sessions: &[String]) -> ([u8; 3], String) {
     let recent = Timestamp::now() - SignedDuration::from_hours(8);
-    let count = |s| live.values().filter(|l| l.state == s && l.since > recent).count();
-    let (needs, working) = (count(State::NeedsYou), count(State::Working));
-    let (color, tip) = match (needs, working) {
-        (0, 0) => ([0x89, 0x87, 0x81], "AgentPulse: all quiet".to_string()),
-        (0, w) => ([0x0c, 0xa3, 0x0c], format!("AgentPulse: {w} working")),
-        (n, w) => ([0xfa, 0xb2, 0x19], format!("AgentPulse: {n} need you, {w} working")),
-    };
-    set_tray(&tray, color, &tip);
+    let hooked = |s| live.values().filter(|l| l.state == s && l.since > recent).count();
+    let needs = hooked(State::NeedsYou);
+    let working = hooked(State::Working) + logs.values().filter(|s| s.state == "working").count();
+    // Sub-agents of a session that has ended were stopped with it.
+    let agents = agent_sessions.iter().filter(|id| live.get(*id).is_none_or(|l| l.state != State::Ended)).count();
+    let mut parts = Vec::new();
+    if needs > 0 {
+        parts.push(format!("{needs} need{} you", if needs == 1 { "s" } else { "" }));
+    }
+    if working > 0 {
+        parts.push(format!("{working} working"));
+    }
+    if agents > 0 {
+        parts.push(format!("{agents} sub-agent{} running", if agents == 1 { "" } else { "s" }));
+    }
+    let tip = if parts.is_empty() { "AgentPulse: all quiet".to_string() } else { format!("AgentPulse: {}", parts.join(", ")) };
+    let color = if needs > 0 { NEEDS_YOU } else if working + agents > 0 { WORKING } else { QUIET };
+    (color, tip)
 }
 
-fn set_tray(tray: &TrayIcon, color: [u8; 3], tip: &str) {
-    let _ = tray.set_icon(Some(dot(color)));
-    let _ = tray.set_tooltip(Some(tip));
+/// Every 2 s: refresh all agent logs (agents without hooks only show up there), alert when a
+/// log-only session finishes its turn, and keep the tray light current. The first pass also
+/// parses the whole history, so the first dashboard call is fast.
+fn spawn_monitor(app: AppHandle) {
+    std::thread::spawn(move || {
+        let mut before: Option<HashMap<String, stats::LogState>> = None;
+        let mut shown: Option<([u8; 3], String)> = None;
+        loop {
+            let state = app.state::<AppState>();
+            let snapshot = state.cache.lock().ok().map(|mut cache| {
+                refresh(&state, &mut cache);
+                let now = Timestamp::now();
+                let agents: Vec<String> = cache.agents().into_iter().filter(|a| stats::agent_running(a, now)).map(|a| a.session.clone()).collect();
+                (stats::log_states(&cache.meta(), now), agents)
+            });
+            if let Some((logs, agents)) = snapshot {
+                if let Some(b) = &before {
+                    for (kind, s) in stats::log_alerts(b, &logs) {
+                        let (what, body) = match kind {
+                            AlertKind::Done => ("finished", "Task complete."),
+                            AlertKind::NeedsYou => ("needs you", "Waiting for your approval."),
+                        };
+                        let title = format!("{} {what}: {}", s.provider.label(), s.project);
+                        on_alert(&app, &events::Alert { kind, project: s.project.clone(), title, body: body.into() });
+                    }
+                }
+                let live = state.live.lock().map(|l| l.clone()).unwrap_or_default();
+                let status = tray_status(&live, &logs, &agents);
+                if shown.as_ref() != Some(&status) {
+                    if let Some(tray) = app.tray_by_id("main") {
+                        let _ = tray.set_icon(Some(tray_icon(status.0)));
+                        let _ = tray.set_tooltip(Some(&status.1));
+                    }
+                    shown = Some(status);
+                }
+                before = Some(logs);
+            }
+            std::thread::sleep(Duration::from_secs(2));
+        }
+    });
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    use tauri_plugin_window_state::StateFlags;
     tauri::Builder::default()
         // Must be first: a second launch just focuses the running instance.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)))
@@ -351,6 +464,8 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec![MINIMIZED_FLAG]),
         ))
+        // Windows reopen where the user left them; visibility is ours (tray start, widget flag).
+        .plugin(tauri_plugin_window_state::Builder::new().with_state_flags(StateFlags::POSITION | StateFlags::SIZE | StateFlags::MAXIMIZED).build())
         .invoke_handler(tauri::generate_handler![
             dashboard,
             hook_status,
@@ -364,9 +479,11 @@ pub fn run() {
             get_settings,
             save_settings,
             test_push,
+            test_sound,
             decide_permission,
             session_history,
             toggle_widget,
+            open_dashboard,
             open_session,
             send_reply,
             cancel_reply,
@@ -384,8 +501,19 @@ pub fn run() {
             if script_path.exists() {
                 let _ = install_script(&script_path);
             }
+            // Point an existing login item at this copy of the app (it may have been registered
+            // by an older install or another folder). Dev builds never register themselves.
+            if !cfg!(debug_assertions) {
+                use tauri_plugin_autostart::ManagerExt;
+                let a = app.autolaunch();
+                if a.is_enabled().unwrap_or(false) {
+                    let _ = a.enable();
+                }
+            }
+            let widget_flag = data.join("widget-visible");
             app.manage(AppState {
                 claude_dir: logs::claude_dir(&home),
+                roots: logs::roots(&home),
                 cache: Mutex::new(logs::LogCache::default()),
                 live: live.clone(),
                 replies: actions::Replies::default(),
@@ -395,9 +523,15 @@ pub fn run() {
                 settings_path: data.join("settings.json"),
                 approvals: approvals.clone(),
                 decisions_dir: data.join("decisions"),
+                widget_flag: widget_flag.clone(),
             });
             if !std::env::args().any(|a| a == MINIMIZED_FLAG) {
                 show_main(app.handle());
+            }
+            if widget_flag.exists() {
+                if let Some(w) = app.get_webview_window("widget") {
+                    let _ = w.show();
+                }
             }
 
             let open = MenuItem::with_id(app, "open", "Open AgentPulse", true, None::<&str>)?;
@@ -405,7 +539,7 @@ pub fn run() {
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open, &widget, &quit])?;
             TrayIconBuilder::with_id("main")
-                .icon(dot([0x89, 0x87, 0x81]))
+                .icon(tray_icon(QUIET))
                 .tooltip("AgentPulse")
                 .menu(&menu)
                 .show_menu_on_left_click(false)
@@ -423,16 +557,8 @@ pub fn run() {
                 .build(app)?;
 
             let events_file = data.join("events.jsonl");
-            events::spawn_watcher(app.handle().clone(), events_file, live, approvals, on_alert, update_tray);
-
-            // Parse log history in the background so the first dashboard call is fast.
-            let handle = app.handle().clone();
-            std::thread::spawn(move || {
-                let state = handle.state::<AppState>();
-                if let Ok(mut c) = state.cache.lock() {
-                    refresh(&state, &mut c);
-                }
-            });
+            events::spawn_watcher(app.handle().clone(), events_file, live, approvals, on_alert);
+            spawn_monitor(app.handle().clone());
             Ok(())
         })
         // Closing a window hides it; "Quit" in the tray menu exits.
@@ -440,8 +566,37 @@ pub fn run() {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
                 let _ = window.hide();
+                if window.label() == "widget" {
+                    remember_widget(window.app_handle(), false);
+                }
             }
         })
         .run(tauri::generate_context!())
         .expect("error while running AgentPulse");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tray_icon_is_a_rounded_square_with_the_status_line() {
+        let px = tray_icon(WORKING).rgba().to_vec();
+        let at = |x: usize, y: usize| &px[(y * 32 + x) * 4..(y * 32 + x) * 4 + 4];
+        assert_eq!(at(0, 0)[3], 0); // rounded corner is transparent
+        assert_eq!(at(16, 2)[3], 255); // inside the square
+        assert_eq!(&at(8, 17)[..3], &WORKING); // on the flat part of the pulse line
+    }
+
+    #[test]
+    fn tray_status_counts_everything_that_runs() {
+        let now = Timestamp::now();
+        let l = |state| events::Live { state, since: now, project: "p".into(), message: String::new() };
+        let live = HashMap::from([("a".to_string(), l(State::NeedsYou)), ("gone".to_string(), l(State::Ended))]);
+        let logs = HashMap::from([("cx".to_string(), stats::LogState { state: "working", provider: Provider::Codex, project: "p".into() })]);
+        let (color, tip) = tray_status(&live, &logs, &["s".into(), "gone".into()]);
+        assert_eq!((color, tip.as_str()), (NEEDS_YOU, "AgentPulse: 1 needs you, 1 working, 1 sub-agent running"));
+        assert_eq!(tray_status(&HashMap::new(), &HashMap::new(), &[]), (QUIET, "AgentPulse: all quiet".to_string()));
+        assert_eq!(tray_status(&HashMap::new(), &HashMap::new(), &["s".into()]).0, WORKING);
+    }
 }

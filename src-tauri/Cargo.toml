@@ -18,6 +18,8 @@ tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-notification = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-autostart = "2"
+# Reopens the dashboard and floating widget where the user left them.
+tauri-plugin-window-state = "2"
 # Signed updates from GitHub Releases (minisign signature checked against the pubkey in tauri.conf.json).
 tauri-plugin-updater = "2"
 # Already in the build via the updater; used directly for opt-in ntfy phone push.

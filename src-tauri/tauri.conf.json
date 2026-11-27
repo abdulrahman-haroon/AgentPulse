@@ -24,8 +24,8 @@
       {
         "label": "widget",
         "title": "AgentPulse widget",
-        "width": 300,
-        "height": 188,
+        "width": 340,
+        "height": 150,
         "visible": false,
         "decorations": false,
         "transparent": true,
@@ -48,7 +48,7 @@
     ],
     "category": "DeveloperTool",
     "shortDescription": "Mission control for AI coding agents",
-    "longDescription": "See every Claude Code session at once, get notified when one needs you, track cost, and reply without switching windows. 100% local.",
+    "longDescription": "See every Claude Code, Codex and Copilot CLI session and sub-agent at once, hear when one needs you, track cost, and reply without switching windows. 100% local.",
     "copyright": "Copyright (c) 2026 AgentPulse contributors. MIT License.",
     "publisher": "AgentPulse contributors",
     "windows": {

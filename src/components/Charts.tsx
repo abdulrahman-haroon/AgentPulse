@@ -1,6 +1,30 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import type { DayPoint, NameValue } from "../api";
-import { dayLabel, money, moneyTick, tokens, weekdayLabel } from "../format";
+import type { DayPoint, NameValue, PlanLimit } from "../api";
+import { dayLabel, duration, money, moneyTick, tokens, weekdayLabel } from "../format";
+import { providerName } from "./Agents";
+
+/** Plan usage an agent reports about itself (Codex logs it), so these are real numbers. */
+export function LimitBars({ limits, now }: { limits: PlanLimit[]; now: number }) {
+  return (
+    <ul className="limits">
+      {limits.map((l) => {
+        const level = l.used_percent >= 90 ? "limit-high" : l.used_percent >= 70 ? "limit-mid" : "";
+        return (
+          <li key={`${l.provider}-${l.window}`}>
+            <div className="limit-row">
+              <span>{providerName(l.provider)} · {l.window}</span>
+              <span className="limit-value">{Math.round(l.used_percent)}%</span>
+            </div>
+            <div className="track" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(l.used_percent)} aria-label={`${providerName(l.provider)} ${l.window} limit used`}>
+              <div className={`track-fill ${level}`} style={{ width: `${Math.max(1, l.used_percent)}%` }} />
+            </div>
+            {l.resets_at && <span className="limit-reset">resets in {duration(new Date(l.resets_at).getTime() - now)}</span>}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
 
 function useWidth<T extends HTMLElement>() {
   const ref = useRef<T>(null);
@@ -101,8 +125,8 @@ export function RankedBars({ items, empty }: { items: NameValue[]; empty: string
             <span className="ranked-name">{i.name}</span>
             <span className="ranked-value">{money(i.cost)}</span>
           </div>
-          <div className="ranked-track">
-            <div className="ranked-fill" style={{ width: `${Math.max(1, (i.cost / max) * 100)}%` }} />
+          <div className="track">
+            <div className="track-fill" style={{ width: `${Math.max(1, (i.cost / max) * 100)}%` }} />
           </div>
         </li>
       ))}
