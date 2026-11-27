@@ -1,6 +1,6 @@
 [package]
 name = "agentpulse"
-version = "0.3.0"
+version = "0.3.1"
 description = "Tray app for AI coding agents: usage stats and task-done notifications"
 license = "MIT"
 edition = "2024"
