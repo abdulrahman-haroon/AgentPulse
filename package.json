@@ -1,7 +1,7 @@
 {
   "name": "agentpulse",
   "private": true,
-  "version": "0.3.1",
+  "version": "0.3.3",
   "license": "MIT",
   "type": "module",
   "scripts": {
@@ -19,7 +19,7 @@
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^6.0.2",
-    "typescript": "~6.0.3",
+    "typescript": "~7.0.2",
     "vite": "^8.0.16",
     "@tauri-apps/cli": "^2"
   }

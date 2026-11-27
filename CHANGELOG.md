@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.3
 
 - **Claude Code plan limits.** See how much of your 5-hour and weekly limits you've used (and your spend limit, if your plan has one), with the reset time, in the widget and on the Live page. The numbers are Claude Code's own, read from its status line (Pro and Max plans). Existing installs: click **Repair connection…** in Settings once; your own status line keeps working.
 - **Copilot AI credits.** Pick your Copilot plan in Settings to see an estimate of this month's AI credits used, counted from this computer's Copilot CLI logs.
