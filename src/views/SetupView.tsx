@@ -38,7 +38,8 @@ export function SetupView({ status, setStatus, recheck, update, sources }: Props
   useEffect(() => { getSettings().then(setSettings).catch((e) => setError(String(e))); }, []);
   const savePart = async (patch: Partial<Settings>) => {
     if (!settings) return;
-    setSettings(await saveSettings({ ...settings, ...patch }));
+    // On top of the saved settings, not our copy: the widget's bell may have changed sound since.
+    setSettings(await saveSettings({ ...(await getSettings()), ...patch }));
   };
 
   const connected = !!status && status.missing.length === 0;

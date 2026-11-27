@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { cancelReply, dismissReply, openSession, sendReply, type PermissionMode, type Reply, type Session } from "../api";
+import { cancelReply, dismissReply, focusSession, openSession, sendReply, type PermissionMode, type Reply, type Session } from "../api";
 import { money, since } from "../format";
 import { StatusBadge } from "./StatusBadge";
 import { SpinIcon } from "./Icons";
@@ -18,7 +18,7 @@ function timeLabel(s: Session, now: number) {
 }
 
 function openLabel(s: Session) {
-  if (s.provider !== "claude") return null; // Open/Reply drive the `claude` command only
+  if (s.provider !== "claude") return "Open in VS Code"; // other agents: their project; Resume/Reply drive `claude` only
   if (s.entrypoint.includes("vscode")) return "Open in VS Code";
   return s.state === "working" || s.state === "needs_you" ? null : "Resume in terminal";
 }
@@ -107,7 +107,7 @@ export function SessionCard({ s, reply, now }: { s: Session; reply?: Reply; now:
           <span className="muted"> · {s.requests} {s.requests === 1 ? "request" : "requests"}</span>
         </span>
         <span className="session-actions">
-          {open && <button className="ghost" disabled={busy} onClick={() => run(() => openSession(s.id))}>{open}</button>}
+          {open && <button className="ghost" disabled={busy} onClick={() => run(() => (s.provider === "claude" ? openSession(s.id) : focusSession(s.id)))}>{open}</button>}
           {canReply && !composing && <button className="primary" onClick={() => setComposing(true)}>Reply</button>}
         </span>
       </footer>

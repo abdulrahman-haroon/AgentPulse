@@ -6,32 +6,46 @@ use std::f32::consts::PI;
 
 const RATE: u32 = 44_100;
 
-/// (frequency Hz, start seconds) per note.
+/// Peak level, well below full scale: an alert should be noticed, not startle.
+const LEVEL: f32 = 0.22;
+/// Fade-in per note. Anything much shorter is heard as a click.
+const ATTACK: f32 = 0.03;
+
+/// (frequency Hz, start seconds) per note. Two notes each, mid register (where the ear is less
+/// sensitive than at 1-2 kHz), told apart by direction rather than loudness.
 fn notes(kind: AlertKind) -> &'static [(f32, f32)] {
     match kind {
-        // G5 → C6: a soft "finished".
-        AlertKind::Done => &[(783.99, 0.0), (1046.50, 0.13)],
-        // C6 E6 C6 E6: brighter and longer, so "your turn" is told apart without looking.
-        AlertKind::NeedsYou => &[(1046.50, 0.0), (1318.51, 0.11), (1046.50, 0.22), (1318.51, 0.33)],
+        // E5 → C5, falling: settled, "all done".
+        AlertKind::Done => &[(659.25, 0.0), (523.25, 0.2)],
+        // C5 → G5, rising: a gentle "hey, your turn".
+        AlertKind::NeedsYou => &[(523.25, 0.0), (783.99, 0.18)],
     }
 }
 
-/// 16-bit mono PCM WAV of a short bell-like chime.
+/// 16-bit mono PCM WAV of a soft, kalimba-like chime.
 pub fn wav(kind: AlertKind) -> Vec<u8> {
     let notes = notes(kind);
-    let secs = notes.iter().map(|n| n.1).fold(0.0, f32::max) + 0.7;
+    let secs = notes.iter().map(|n| n.1).fold(0.0, f32::max) + 1.2;
     let mut pcm = vec![0f32; (secs * RATE as f32) as usize];
     for &(freq, start) in notes {
         let from = (start * RATE as f32) as usize;
         for (i, s) in pcm.iter_mut().enumerate().skip(from) {
             let t = (i - from) as f32 / RATE as f32;
-            let envelope = (t / 0.005).min(1.0) * (-t * 7.5).exp(); // 5 ms attack, bell decay
+            let rise = (t / ATTACK).min(1.0);
+            let envelope = rise * rise * (3.0 - 2.0 * rise) * (-t * 4.0).exp(); // smooth fade-in, long gentle ring
             let w = 2.0 * PI * freq * t;
-            *s += envelope * (w.sin() + 0.28 * (2.0 * w).sin() + 0.08 * (3.0 * w).sin());
+            // Overtones fade fast: a touch of brightness at the start, then a pure, warm tone.
+            *s += envelope * (w.sin() + 0.12 * (-t * 14.0).exp() * (2.0 * w).sin() + 0.04 * (-t * 22.0).exp() * (3.0 * w).sin());
         }
     }
+    // Fade the last 80 ms to silence so the end never clicks.
+    let tail = (0.08 * RATE as f32) as usize;
+    let len = pcm.len();
+    for (k, s) in pcm[len - tail..].iter_mut().enumerate() {
+        *s *= 1.0 - k as f32 / tail as f32;
+    }
     let peak = pcm.iter().fold(1e-6f32, |m, v| m.max(v.abs()));
-    let gain = 0.45 / peak; // comfortable level; the system volume does the rest
+    let gain = LEVEL / peak; // the system volume does the rest
 
     let data_len = (pcm.len() * 2) as u32;
     let mut out = Vec::with_capacity(44 + data_len as usize);
@@ -85,7 +99,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn writes_a_valid_wav_that_is_not_clipped() {
+    fn writes_a_valid_wav_that_is_quiet_and_never_clicks() {
         for kind in [AlertKind::Done, AlertKind::NeedsYou] {
             let w = wav(kind);
             assert_eq!(&w[0..4], b"RIFF");
@@ -93,9 +107,15 @@ mod tests {
             let data_len = u32::from_le_bytes(w[40..44].try_into().unwrap()) as usize;
             assert_eq!(w.len(), 44 + data_len);
             assert_eq!(u32::from_le_bytes(w[4..8].try_into().unwrap()) as usize, w.len() - 8);
-            let peak = w[44..].chunks(2).map(|c| i16::from_le_bytes([c[0], c[1]]).unsigned_abs()).max().unwrap();
-            assert!((10_000..i16::MAX as u16).contains(&peak), "{peak}");
+            let s: Vec<u16> = w[44..].chunks(2).map(|c| i16::from_le_bytes([c[0], c[1]]).unsigned_abs()).collect();
+            let peak = *s.iter().max().unwrap();
+            // about a fifth of full scale: present, never startling
+            assert!((6_000..8_000).contains(&peak), "{peak}");
+            // soft start: the first 5 ms stay well under the peak (no click)
+            assert!(s[..RATE as usize / 200].iter().all(|v| *v < peak / 10), "attack too sharp");
+            // and it ends in silence
+            assert!(*s.last().unwrap() < 50);
         }
-        assert!(wav(AlertKind::NeedsYou).len() > wav(AlertKind::Done).len()); // longer, so it's distinguishable
+        assert_ne!(wav(AlertKind::Done), wav(AlertKind::NeedsYou)); // told apart by ear
     }
 }

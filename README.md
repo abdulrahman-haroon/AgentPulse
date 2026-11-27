@@ -30,9 +30,9 @@ Running Claude Code in three terminals, Codex in a fourth, and a pile of sub-age
 | **Insights** | Today's cost vs. yesterday at the same time, burn rate ($/hour right now), money saved by prompt caching, most expensive session, average per session and per request, cost by model and by agent. |
 | **History** | 7 or 30-day cost chart, top projects, and a weekday × hour heatmap of when you actually work with your agents. |
 | **Settings** | Which agents were found on this computer, one-click **Connect hooks** for Claude Code (backs up your settings first, touches only AgentPulse's own entries), **Alert sound**, approvals, phone notifications, **Start with Windows**, and **Updates**. |
-| **Floating widget** | An always-on-top companion for a second monitor: what needs you, what's working, running sub-agents, **Allow once / Deny** for approvals right in the widget, Codex plan usage and today's cost. It sizes itself to its content, collapses to a single strip, and remembers where you put it. |
+| **Floating widget** | An always-on-top companion for a second monitor: sessions **grouped by agent** (collapsible, with each agent's state counts and spend today), running sub-agents, **Allow once / Deny** for approvals right in the widget, Codex plan usage inside its group, today's cost, and a bell to mute alert sounds. Click a session to jump to its project in VS Code. It sizes itself to its content, collapses to a single strip, and remembers where you put it. |
 | **Tray icon** | The AgentPulse mark, colored by status: grey = quiet, blue = something's working (including sub-agents), amber = a session needs you. The tooltip says what. |
-| **Notifications + sound** | Native popups and a short chime when a task finishes or needs you: a soft one for *done*, a brighter one for *needs you*, so you can tell them apart without looking. Works for Codex and Copilot too (from their logs). Each sound can be turned off. |
+| **Notifications + sound** | Native popups and a soft chime when a task finishes or needs you: two calm notes, falling for *done* and rising for *needs you*, so you can tell them apart without looking. Works for Codex and Copilot too (from their logs). Each sound can be turned off. |
 | **Phone notifications** | Optional push to your phone through [ntfy](https://ntfy.sh) (free, open source), so you can walk away while Claude works. Off by default, private random topic, generic messages unless you opt in to details, self-hosted servers supported. |
 
 ### Supported agents
@@ -43,7 +43,7 @@ Running Claude Code in three terminals, Codex in a fourth, and a pile of sub-age
 | **OpenAI Codex CLI** | Session logs (`~/.codex/sessions`) | Live state (from the log), finished alerts, cost estimate at OpenAI API prices, real plan usage. Built from Codex's documented-by-the-community format; not yet checked against a real install |
 | **GitHub Copilot CLI** | Session logs (`~/.copilot/session-state`) | Live state, **needs you** when it waits for a permission, finished alerts, tokens, sub-agents (with background/foreground). No cost: Copilot bills per premium request. Its log format is undocumented; checked against real Copilot CLI sessions (Nov 2026) |
 
-Nothing to set up for Codex or Copilot: install the agent, use it once, and it shows up. `CODEX_HOME` and `COPILOT_HOME` are honored. Open and Quick reply drive the `claude` command, so they're offered for Claude Code sessions only.
+Nothing to set up for Codex or Copilot: install the agent, use it once, and it shows up. `CODEX_HOME` and `COPILOT_HOME` are honored. Any session can be opened in VS Code (its project folder; an open window is brought forward). Resume in terminal and Quick reply drive the `claude` command, so they're Claude Code only.
 
 Planned: macOS/Linux.
 

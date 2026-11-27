@@ -21,6 +21,7 @@
     "allow-session-history",
     "allow-toggle-widget",
     "allow-open-session",
+    "allow-focus-session",
     "allow-send-reply",
     "allow-cancel-reply",
     "allow-dismiss-reply"

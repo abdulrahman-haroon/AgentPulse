@@ -152,24 +152,27 @@ function writeCodex({ project, prompt, start, turns, done, limits }) {
   utimesSync(file, new Date(t), new Date(t));
 }
 
-// A Copilot CLI session (~/.copilot/session-state/<id>/events.jsonl). Its format is undocumented;
-// this follows the community-documented shape AgentPulse parses.
+// A Copilot CLI session (~/.copilot/session-state/<id>/events.jsonl). Undocumented format; this
+// follows the shape of real sessions: a model turn per call, usage per call, a checkpoint when done.
 function writeCopilot({ project, prompt, start, messages }) {
   const id = uuid();
   const dir = join(out, "copilot", "session-state", id);
   mkdirSync(dir, { recursive: true });
   const at = (ms) => new Date(ms).toISOString();
+  let e = 0;
+  const ev = (type, ms, data) => ({ type, data, id: `ev${++e}`, timestamp: at(ms), parentId: null });
   const lines = [
-    { type: "session.start", timestamp: at(start), data: { context: { cwd: `/home/dev/code/${project}` }, model: "claude-sonnet-4.5" } },
-    { type: "user.message", timestamp: at(start + 2000), data: { content: prompt } },
-    { type: "assistant.turn_start", timestamp: at(start + 2500), data: {} },
+    ev("session.start", start, { sessionId: id, selectedModel: "claude-sonnet-4.5", context: { cwd: `/home/dev/code/${project}` } }),
+    ev("user.message", start + 2000, { content: prompt }),
   ];
   let t = start + 3000;
   for (let i = 0; i < messages; i++) {
+    lines.push(ev("assistant.turn_start", t, { turnId: String(i) }));
     t += int(5_000, 30_000);
-    lines.push({ type: "assistant.message", timestamp: at(t), data: { messageId: `cm${++n}`, outputTokens: int(100, 900) } });
+    lines.push(ev("session.usage_record", t, { usage: { model: "claude-sonnet-4.5", inputTokens: int(20_000, 60_000), outputTokens: int(100, 900) } }));
+    lines.push(ev("assistant.turn_end", t + 200, { turnId: String(i) }));
   }
-  lines.push({ type: "assistant.turn_end", timestamp: at(t + 500), data: {} });
+  lines.push(ev("session.usage_checkpoint", t + 500, { totalPremiumRequests: 1 }));
   const file = join(dir, "events.jsonl");
   writeFileSync(file, lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
   utimesSync(file, new Date(t), new Date(t));

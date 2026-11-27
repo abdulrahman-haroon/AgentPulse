@@ -26,6 +26,10 @@
   --done-soft: rgba(52, 211, 153, 0.13);
   --agents: #c084fc;
   --agents-soft: rgba(192, 132, 252, 0.14);
+  /* Agent identity: a small mark next to the name, never the only cue. */
+  --claude: #e8875b;
+  --codex: #d4d4d8;
+  --copilot: #a78bfa;
   --up: #fb7185;                     /* cost went up (bad) */
   --down: #34d399;                   /* cost went down (good) */
   --error: #fda4af;
@@ -241,9 +245,9 @@ mark { background: color-mix(in srgb, var(--needs) 35%, transparent); color: inh
   white-space: nowrap; vertical-align: 1px;
 }
 .ptag::before { content: ""; width: 6px; height: 6px; border-radius: 2px; background: var(--muted); }
-.ptag-claude::before { background: #e8875b; }
-.ptag-codex::before { background: #d4d4d8; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25); }
-.ptag-copilot::before { background: #a78bfa; }
+.ptag-claude::before, .w-gmark-claude { background: var(--claude); }
+.ptag-codex::before, .w-gmark-codex { background: var(--codex); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25); }
+.ptag-copilot::before, .w-gmark-copilot { background: var(--copilot); }
 .achip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; color: var(--muted); background: var(--card-2); }
 .achip-on { color: var(--agents); background: var(--agents-soft); }
 
@@ -463,25 +467,46 @@ button:disabled { opacity: 0.5; cursor: default; filter: none; }
 .approval-compact .approval-summary { font-size: 12px; max-height: 120px; }
 .approval-compact .approval-detail pre { max-height: 140px; font-size: 11.5px; }
 .approval-compact .approval-actions { justify-content: flex-end; }
-.w-body { overflow-y: auto; min-height: 0; padding: 0 8px 8px; display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--border); }
-.w-list { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.w-body { overflow-y: auto; min-height: 0; padding: 6px 8px 8px; display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--border); }
+.w-group { display: flex; flex-direction: column; gap: 2px; padding-bottom: 4px; }
+.w-group + .w-group { border-top: 1px solid var(--border); padding-top: 6px; }
+.w-ghead {
+  display: flex; align-items: center; gap: 7px; width: 100%; text-align: left;
+  border: 0; background: transparent; border-radius: 8px; padding: 4px 6px; color: var(--ink-2); font-size: 12px;
+}
+.w-ghead:hover { background: var(--card-2); color: var(--ink); }
+.w-ghead svg { color: var(--muted); transition: transform 0.15s; flex: none; }
+.w-ghead-folded svg { transform: rotate(-90deg); }
+.w-gmark { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.w-gname { font-weight: 700; color: var(--ink); white-space: nowrap; }
+.w-gcounts { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+.w-gtoday { color: var(--ink-2); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.w-more { align-self: flex-start; margin-left: 26px; border: 0; background: transparent; color: var(--accent); font-size: 11.5px; padding: 2px 0; }
+.w-more:hover { text-decoration: underline; }
+.w-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
 .w-row {
   width: 100%; display: grid; grid-template-columns: 8px 1fr; gap: 10px; align-items: start; text-align: left;
   border: 0; background: transparent; border-radius: 10px; padding: 7px 8px;
 }
 .w-row .dot { margin-top: 6px; }
 .w-row:hover { background: var(--card-2); }
+/* Keyboard focus stays visible, but softer than the global ring (a click shouldn't leave a loud outline). */
+.w-row:focus-visible, .w-ghead:focus-visible, .w-btn:focus-visible { outline: none; background: var(--card-2); box-shadow: inset 0 0 0 1px var(--border-strong); }
 .w-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .w-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .w-title { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+.w-cost { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .w-sub { font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .w-msg { font-size: 11.5px; color: var(--needs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .w-empty { color: var(--muted); font-size: 12.5px; padding: 10px 6px 4px; }
+.w-err { margin: 0 8px 4px 26px; font-size: 11.5px; color: var(--error); }
 .widget .agents { margin: 0 6px 4px 26px; padding: 5px 8px; gap: 3px; }
 .widget .agents li { font-size: 11.5px; }
-.widget .limits { grid-template-columns: 1fr 1fr; gap: 8px 14px; padding: 8px 6px 2px; border-top: 1px solid var(--border); }
+.widget .limits { grid-template-columns: 1fr 1fr; gap: 8px 14px; padding: 2px 8px 6px 26px; }
 .widget .limit-row { font-size: 11.5px; margin-bottom: 4px; }
 .widget .limit-reset { font-size: 10.5px; margin-top: 3px; }
-.w-foot { display: flex; align-items: baseline; gap: 6px; padding: 8px 12px 9px; border-top: 1px solid var(--border); background: var(--card-2); }
-.w-cost { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+.w-foot { display: flex; align-items: center; gap: 6px; padding: 6px 8px 6px 12px; border-top: 1px solid var(--border); background: var(--card-2); }
+.w-total { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+.w-bell { margin-left: auto; align-self: center; }
+.w-bell-off { color: var(--needs); }
 .w-muted { font-size: 12px; color: var(--muted); }

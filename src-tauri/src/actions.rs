@@ -135,19 +135,50 @@ fn command(program: &Path) -> Command {
     cmd
 }
 
-/// VS Code sessions: focus/open the project folder in VS Code.
-/// Terminal sessions: resume in a new console window (only when not running elsewhere).
-pub fn open_session(id: &str, cwd: &str, entrypoint: &str, running: bool) -> Result<(), String> {
+/// Opens the session's project folder in VS Code; if a window already has it open, VS Code just
+/// brings that window forward. Works for any agent and never starts one.
+pub fn open_in_vscode(id: &str, cwd: &str) -> Result<(), String> {
     if !is_uuid(id) {
         return Err("Invalid session id.".into());
     }
     let dir = existing_dir(cwd)?;
-    if entrypoint.contains("vscode") {
-        let code = find_on_path(if cfg!(windows) { &["code.cmd", "code.exe"] } else { &["code"] })
-            .ok_or("Couldn't find the `code` command on PATH.")?;
-        command(&code).arg(dir).spawn().map_err(|e| e.to_string())?;
-        return Ok(());
+    let code = find_on_path(if cfg!(windows) { &["code.cmd", "code.exe"] } else { &["code"] })
+        .ok_or("Couldn't find the `code` command on PATH.")?;
+    let mut cmd = command(&code);
+    cmd.arg(dir);
+    allow_foreground();
+    // code.cmd is a batch file: without this a console window flashes up.
+    flags(&mut cmd, CREATE_NO_WINDOW).spawn().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// The user just clicked us, so we may hand focus on: without this, Windows won't let the
+/// already-running VS Code come to the front (its taskbar button only flashes).
+#[cfg(windows)]
+fn allow_foreground() {
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn AllowSetForegroundWindow(process_id: u32) -> i32;
     }
+    const ASFW_ANY: u32 = u32::MAX;
+    // SAFETY: plain value argument; it only lets the next window that asks take the foreground once.
+    unsafe {
+        AllowSetForegroundWindow(ASFW_ANY);
+    }
+}
+#[cfg(not(windows))]
+fn allow_foreground() {}
+
+/// VS Code sessions: focus/open the project folder in VS Code.
+/// Terminal sessions: resume in a new console window (only when not running elsewhere).
+pub fn open_session(id: &str, cwd: &str, entrypoint: &str, running: bool) -> Result<(), String> {
+    if entrypoint.contains("vscode") {
+        return open_in_vscode(id, cwd);
+    }
+    if !is_uuid(id) {
+        return Err("Invalid session id.".into());
+    }
+    let dir = existing_dir(cwd)?;
     if running {
         return Err("This session is running in a terminal. Switch to that window to answer it.".into());
     }
@@ -361,6 +392,9 @@ mod tests {
         assert!(start_reply(&r, id, ".", None, "   ", "default").is_err());
         assert!(start_reply(&r, id, ".", None, "hi", "bypassPermissions").is_err());
         assert!(start_reply(&r, id, "Z:\\definitely\\missing", None, "hi", "default").is_err());
+        assert!(open_in_vscode("../../evil", ".").is_err());
+        assert!(open_in_vscode(id, "Z:\\definitely\\missing").is_err());
+        assert!(open_in_vscode(id, "").is_err());
         assert!(valid_model("claude-opus-5-5"));
         assert!(!valid_model("<synthetic>"));
         assert!(!valid_model("--dangerously-skip-permissions"));

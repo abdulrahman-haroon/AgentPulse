@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { openSession, sessionHistory, type SessionRow } from "../api";
+import { focusSession, openSession, sessionHistory, type SessionRow } from "../api";
 import { duration, money, tokens } from "../format";
 import { SearchIcon } from "../components/Icons";
 import { ProviderTag, providerName } from "../components/Agents";
@@ -50,11 +50,12 @@ function Row({ s, words }: { s: SessionRow; words: string[] }) {
       </div>
       <div className="srow-side">
         <span className="srow-cost">{s.provider === "copilot" ? "—" : money(s.cost)}</span>
-        {s.provider === "claude" && (
-          <button className="ghost" onClick={() => openSession(s.id).then(() => setError(null)).catch((e) => setError(String(e)))}>
-            {vscode ? "Open in VS Code" : "Resume in terminal"}
-          </button>
-        )}
+        <button
+          className="ghost"
+          onClick={() => (s.provider === "claude" ? openSession(s.id) : focusSession(s.id)).then(() => setError(null)).catch((e) => setError(String(e)))}
+        >
+          {vscode || s.provider !== "claude" ? "Open in VS Code" : "Resume in terminal"}
+        </button>
       </div>
     </li>
   );

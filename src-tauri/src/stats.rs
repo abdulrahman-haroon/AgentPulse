@@ -172,6 +172,8 @@ pub struct Dashboard {
     pub providers_today: Vec<NameValue>,
     /// Filled in by lib.rs.
     pub sources: Vec<SourceView>,
+    /// Alert chimes on (from settings; the widget's bell shows and flips it). Filled in by lib.rs.
+    pub sound_enabled: bool,
 }
 
 #[derive(Serialize, Debug, PartialEq)]
@@ -374,6 +376,7 @@ pub fn build<'a>(
         limits: vec![],
         providers_today: vec![],
         sources: vec![],
+        sound_enabled: true,
     };
     let mut models = HashMap::new();
     let mut projects = HashMap::new();

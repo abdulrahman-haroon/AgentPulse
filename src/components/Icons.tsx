@@ -24,5 +24,7 @@ export const SlidersIcon = ({ size = 18 }: P) => svg(size, <><path d="M4 6h9M17 
 export const VolumeIcon = ({ size = 14 }: P) => svg(size, <><path d="M11 5L6 9H3v6h3l5 4z" /><path d="M15.5 8.5a5 5 0 0 1 0 7" /><path d="M18.5 5.5a9 9 0 0 1 0 13" /></>);
 export const ExternalIcon = ({ size = 14 }: P) => svg(size, <><path d="M14 4h6v6" /><path d="M20 4l-9 9" /><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5" /></>);
 export const ChevronIcon = ({ size = 14, up = false }: P & { up?: boolean }) => svg(size, <path d={up ? "M6 15l6-6 6 6" : "M6 9l6 6 6-6"} />);
-export const PlayIcon = ({ size = 12 }: P) => svg(size, <path d="M7 5l12 7-12 7z" />);
+export const BellIcon = ({ size = 14 }: P) => svg(size, <><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /></>);
+export const BellOffIcon = ({ size = 14 }: P) => svg(size, <><path d="M8.7 3.7A6 6 0 0 1 18 8c0 3.2.6 5.4 1.3 6.8" /><path d="M17 17H3s3-2 3-9c0-.6.1-1.2.3-1.8" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /><path d="M3 3l18 18" /></>);
+export const PlayIcon =({ size = 12 }: P) => svg(size, <path d="M7 5l12 7-12 7z" />);
 export const GaugeIcon = ({ size = 14 }: P) => svg(size, <><path d="M4.5 17a8.5 8.5 0 1 1 15 0" /><path d="M12 13l4-4" /></>);

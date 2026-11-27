@@ -22,8 +22,8 @@ export function SoundCard({ sound: s, save }: Props) {
         </label>
       </div>
       <p className="muted">
-        A short chime with every alert, so you hear it even when the notification is hidden. Two different
-        chimes: a soft one when a task finishes, a brighter one when an agent needs you. Follows your system volume.
+        A soft chime with every alert, so you hear it even when the notification is hidden. Two calm notes:
+        falling when a task finishes, rising when an agent needs you. Follows your system volume.
       </p>
       {s.enabled && (
         <div className="checks">

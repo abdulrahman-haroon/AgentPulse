@@ -83,6 +83,7 @@ export type Dashboard = {
   limits: PlanLimit[];
   providers_today: NameValue[];
   sources: Source[];
+  sound_enabled: boolean;
 };
 // Mirrors stats::SessionRow.
 export type SessionRow = {
@@ -143,7 +144,10 @@ export function useDashboard(intervalMs: number) {
 export const toggleWidget = () => invoke("toggle_widget");
 export const openDashboard = () => invoke("open_dashboard");
 export const testSound = (kind: "done" | "needs_you") => invoke("test_sound", { kind });
+export const setSound = (enabled: boolean) => invoke<boolean>("set_sound", { enabled });
 export const openSession = (id: string) => invoke("open_session", { id });
+/** Project folder in VS Code (brings an open window forward). Any agent; never starts one. */
+export const focusSession = (id: string) => invoke("focus_session", { id });
 export const sendReply = (id: string, message: string, mode: PermissionMode) => invoke("send_reply", { id, message, mode });
 export const cancelReply = (id: string) => invoke("cancel_reply", { id });
 export const dismissReply = (id: string) => invoke("dismiss_reply", { id });

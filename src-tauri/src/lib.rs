@@ -78,6 +78,18 @@ async fn test_push(push: settings::PushSettings) -> Result<(), String> {
     push::send(&push, &body).await
 }
 
+/// The widget's bell: alert sounds on/off, every other setting kept. Narrower than save_settings,
+/// so the widget never gets to change push or approval settings.
+#[tauri::command]
+fn set_sound(state: TauriState<'_, AppState>, enabled: bool) -> Result<bool, String> {
+    let mut current = state.settings.lock().map_err(|e| e.to_string())?;
+    let mut next = current.clone();
+    next.sound.enabled = enabled;
+    settings::save(&state.settings_path, &next)?;
+    *current = next;
+    Ok(enabled)
+}
+
 /// Plays an alert chime so the user can hear it (Settings → "Play").
 #[tauri::command]
 fn test_sound(kind: String) {
@@ -139,6 +151,17 @@ async fn open_session(app: AppHandle, id: String) -> Result<(), String> {
     .await
 }
 
+/// Brings up the session's project in VS Code, for any agent (widget row click, Codex/Copilot
+/// cards). The folder comes from our log index, never from the UI.
+#[tauri::command]
+async fn focus_session(app: AppHandle, id: String) -> Result<(), String> {
+    blocking(app, move |s| {
+        let cwd = s.cache.lock().map_err(|e| e.to_string())?.meta().get(id.as_str()).map(|m| m.cwd.clone()).ok_or("Unknown session.")?;
+        actions::open_in_vscode(&id, &cwd)
+    })
+    .await
+}
+
 /// Send a follow-up to a finished/idle session via Claude Code's headless mode.
 #[tauri::command]
 async fn send_reply(app: AppHandle, id: String, message: String, mode: String) -> Result<(), String> {
@@ -172,6 +195,7 @@ async fn dashboard(app: AppHandle) -> Result<stats::Dashboard, String> {
         let now = ZonedDateTime::now();
         let mut d = stats::build(cache.requests(), &cache.titles(), &cache.meta(), &cache.agents(), &live, &now);
         d.limits = cache.limits(now.timestamp());
+        d.sound_enabled = state.settings.lock().map(|s| s.sound.enabled).unwrap_or(true);
         d.replies = state.replies.views();
         if let Ok(ap) = state.approvals.lock() {
             d.approvals = stats::approval_views(&ap, &cache.titles());
@@ -480,11 +504,13 @@ pub fn run() {
             save_settings,
             test_push,
             test_sound,
+            set_sound,
             decide_permission,
             session_history,
             toggle_widget,
             open_dashboard,
             open_session,
+            focus_session,
             send_reply,
             cancel_reply,
             dismiss_reply

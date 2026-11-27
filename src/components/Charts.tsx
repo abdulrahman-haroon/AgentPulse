@@ -4,7 +4,8 @@ import { dayLabel, duration, money, moneyTick, tokens, weekdayLabel } from "../f
 import { providerName } from "./Agents";
 
 /** Plan usage an agent reports about itself (Codex logs it), so these are real numbers. */
-export function LimitBars({ limits, now }: { limits: PlanLimit[]; now: number }) {
+/** `bare`: inside an agent's own group, so the window alone is the label. */
+export function LimitBars({ limits, now, bare = false }: { limits: PlanLimit[]; now: number; bare?: boolean }) {
   return (
     <ul className="limits">
       {limits.map((l) => {
@@ -12,7 +13,7 @@ export function LimitBars({ limits, now }: { limits: PlanLimit[]; now: number })
         return (
           <li key={`${l.provider}-${l.window}`}>
             <div className="limit-row">
-              <span>{providerName(l.provider)} · {l.window}</span>
+              <span>{bare ? l.window : `${providerName(l.provider)} · ${l.window}`}</span>
               <span className="limit-value">{Math.round(l.used_percent)}%</span>
             </div>
             <div className="track" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(l.used_percent)} aria-label={`${providerName(l.provider)} ${l.window} limit used`}>
