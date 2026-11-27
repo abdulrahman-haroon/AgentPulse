@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1
+
+- **Click a Claude Code session to open its chat.** In the widget (and the dashboard's *Open in VS Code*), Claude Code sessions that live in VS Code now open the conversation itself, not just the project. Terminal sessions (Copilot CLI, Codex, Claude Code CLI) still open their project in VS Code.
+- **Richer phone notifications.** With *Include details* on, ntfy messages now say which session, what you asked (or the agent's question), how long it worked, the cost so far and the model. Generic messages now name the right app (Copilot and Codex alerts no longer say "Claude"). *Send a test notification* shows an example of exactly what you'll get.
+- **Easier to scan widget.** Each agent's sessions sit in their own tinted card (orange Claude Code, violet Copilot, silver Codex), and running or waiting sessions are highlighted.
+
 ## 0.3.0
 
 AgentPulse now watches more than Claude Code, shows sub-agents, and has a calmer, redesigned look.

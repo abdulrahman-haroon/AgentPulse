@@ -137,18 +137,32 @@ fn command(program: &Path) -> Command {
 
 /// Opens the session's project folder in VS Code; if a window already has it open, VS Code just
 /// brings that window forward. Works for any agent and never starts one.
-pub fn open_in_vscode(id: &str, cwd: &str) -> Result<(), String> {
+///
+/// `open_chat`: also open the conversation itself, through the Claude Code extension's own link
+/// (`vscode://anthropic.claude-code/open?session=<id>`). Only for sessions that live in the
+/// extension: a terminal session opened there would run a second Claude on the same session.
+pub fn open_in_vscode(id: &str, cwd: &str, open_chat: bool) -> Result<(), String> {
     if !is_uuid(id) {
         return Err("Invalid session id.".into());
     }
     let dir = existing_dir(cwd)?;
     let code = find_on_path(if cfg!(windows) { &["code.cmd", "code.exe"] } else { &["code"] })
         .ok_or("Couldn't find the `code` command on PATH.")?;
-    let mut cmd = command(&code);
-    cmd.arg(dir);
-    allow_foreground();
-    // code.cmd is a batch file: without this a console window flashes up.
-    flags(&mut cmd, CREATE_NO_WINDOW).spawn().map_err(|e| e.to_string())?;
+    let run = |args: &[&std::ffi::OsStr]| -> Result<(), String> {
+        let mut cmd = command(&code);
+        cmd.args(args);
+        allow_foreground();
+        // code.cmd is a batch file: without this a console window flashes up. Waiting for it means
+        // VS Code has taken the request (the CLI hands it to the running instance, then exits).
+        flags(&mut cmd, CREATE_NO_WINDOW).status().map(|_| ()).map_err(|e| e.to_string())
+    };
+    run(&[dir.as_os_str()])?;
+    if open_chat {
+        // VS Code hands links to the window in front, so let the project's window come forward first.
+        std::thread::sleep(std::time::Duration::from_millis(700));
+        let url = format!("vscode://anthropic.claude-code/open?session={id}"); // id is a checked UUID
+        run(&["--open-url".as_ref(), url.as_ref()])?;
+    }
     Ok(())
 }
 
@@ -173,7 +187,7 @@ fn allow_foreground() {}
 /// Terminal sessions: resume in a new console window (only when not running elsewhere).
 pub fn open_session(id: &str, cwd: &str, entrypoint: &str, running: bool) -> Result<(), String> {
     if entrypoint.contains("vscode") {
-        return open_in_vscode(id, cwd);
+        return open_in_vscode(id, cwd, true); // a VS Code session: open its chat too
     }
     if !is_uuid(id) {
         return Err("Invalid session id.".into());
@@ -392,9 +406,9 @@ mod tests {
         assert!(start_reply(&r, id, ".", None, "   ", "default").is_err());
         assert!(start_reply(&r, id, ".", None, "hi", "bypassPermissions").is_err());
         assert!(start_reply(&r, id, "Z:\\definitely\\missing", None, "hi", "default").is_err());
-        assert!(open_in_vscode("../../evil", ".").is_err());
-        assert!(open_in_vscode(id, "Z:\\definitely\\missing").is_err());
-        assert!(open_in_vscode(id, "").is_err());
+        assert!(open_in_vscode("../../evil", ".", true).is_err());
+        assert!(open_in_vscode(id, "Z:\\definitely\\missing", false).is_err());
+        assert!(open_in_vscode(id, "", false).is_err());
         assert!(valid_model("claude-opus-5-5"));
         assert!(!valid_model("<synthetic>"));
         assert!(!valid_model("--dangerously-skip-permissions"));

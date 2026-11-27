@@ -68,10 +68,10 @@ export function PhoneCard({ push: p, save, hooksConnected }: Props) {
 
           <div className="checks">
             <label className="check-row"><input type="checkbox" checked={p.on_done} onChange={(e) => update({ on_done: e.target.checked })} /> When a task finishes</label>
-            <label className="check-row"><input type="checkbox" checked={p.on_needs_you} onChange={(e) => update({ on_needs_you: e.target.checked })} /> When Claude needs your approval</label>
+            <label className="check-row"><input type="checkbox" checked={p.on_needs_you} onChange={(e) => update({ on_needs_you: e.target.checked })} /> When an agent needs you</label>
             <label className="check-row">
               <input type="checkbox" checked={p.include_details} onChange={(e) => update({ include_details: e.target.checked })} />
-              Include project names and Claude's question (otherwise messages are generic, so nothing about your work leaves this computer)
+              Include details: project, session title, what you asked or the agent's question, how long it worked, cost and model. Otherwise messages only say which app finished or needs you, so nothing about your work leaves this computer.
             </label>
           </div>
 

@@ -14,12 +14,61 @@ pub fn wanted(p: &PushSettings, a: &Alert) -> bool {
         }
 }
 
-/// The JSON body for ntfy's publish API. Pure, so the privacy rules are testable.
-pub fn payload(p: &PushSettings, a: &Alert) -> Value {
-    let (title, message) = match (a.kind, p.include_details) {
-        (AlertKind::Done, false) => ("Claude finished".to_string(), "A Claude Code task is done.".to_string()),
-        (AlertKind::NeedsYou, false) => ("Claude needs you".to_string(), "A Claude Code session is waiting for your approval.".to_string()),
-        (_, true) => (a.title.clone(), if a.body.is_empty() { "—".to_string() } else { a.body.clone() }),
+/// What AgentPulse knows about the alert's session, from its own log index (filled in by lib.rs).
+#[derive(Debug, Default, Clone)]
+pub struct Details {
+    /// "Claude Code", "Copilot", "Codex". Always sent: it says which app to look at, not what you work on.
+    pub agent: String,
+    pub session_title: String,
+    pub last_prompt: String,
+    pub model: String,
+    /// Session cost so far, when the agent is billed per token.
+    pub cost: Option<f64>,
+}
+
+/// "45s", "12m", "1h 5m"
+fn took(secs: i64) -> String {
+    match secs {
+        s if s < 60 => format!("{s}s"),
+        s if s < 3600 => format!("{}m", s / 60),
+        s => format!("{}h {}m", s / 3600, s % 3600 / 60),
+    }
+}
+
+/// The JSON body for ntfy's publish API. Pure, so the privacy rules are testable: without
+/// `include_details` only the agent's name and the kind of event leave the machine.
+pub fn payload(p: &PushSettings, a: &Alert, d: &Details) -> Value {
+    let agent = if d.agent.is_empty() { "Claude Code" } else { &d.agent };
+    let done = a.kind == AlertKind::Done;
+    let (title, message) = if !p.include_details {
+        let title = format!("{agent} {}", if done { "finished" } else { "needs you" });
+        let message = if done { "A task is done. Open AgentPulse for details." } else { "A session is waiting for your answer." };
+        (title, message.to_string())
+    } else {
+        let title = format!("{agent} {} · {}", if done { "finished" } else { "needs you" }, a.project);
+        let mut lines = Vec::new();
+        if !d.session_title.is_empty() {
+            lines.push(d.session_title.clone());
+        }
+        if done {
+            if !d.last_prompt.is_empty() {
+                lines.push(format!("You asked: {}", crate::logs::one_line(&d.last_prompt, 160)));
+            }
+        } else if !a.body.is_empty() {
+            lines.push(a.body.clone()); // the agent's question / the tool it wants to use
+        }
+        let facts: Vec<String> = [
+            a.took_secs.filter(|_| done).map(|s| format!("Worked {}", took(s))),
+            d.cost.filter(|c| *c >= 0.005).map(|c| format!("${c:.2} so far")),
+            Some(d.model.trim_start_matches("claude-").to_string()).filter(|m| !m.is_empty()),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        if !facts.is_empty() {
+            lines.push(facts.join(" · "));
+        }
+        (title, if lines.is_empty() { "—".to_string() } else { lines.join("\n") })
     };
     json!({
         "topic": p.topic,
@@ -55,24 +104,46 @@ mod tests {
     use super::*;
 
     fn alert(kind: AlertKind) -> Alert {
-        Alert { kind, project: "secret-project".into(), title: "Claude needs you: secret-project".into(), body: "Allow rm -rf build?".into(), session: String::new() }
+        Alert { kind, project: "secret-project".into(), title: "Claude needs you: secret-project".into(), body: "Allow rm -rf build?".into(), session: String::new(), took_secs: None }
     }
 
     fn settings(include_details: bool) -> PushSettings {
         PushSettings { enabled: true, topic: "agentpulse-k3J9xQ2mPz7a".into(), include_details, ..Default::default() }
     }
 
+    fn details() -> Details {
+        Details {
+            agent: "Copilot".into(),
+            session_title: "Secret title".into(),
+            last_prompt: "secret prompt".into(),
+            model: "claude-opus-5-5".into(),
+            cost: Some(2.784),
+        }
+    }
+
     #[test]
     fn generic_by_default_never_leaks_project_or_question() {
-        let body = payload(&settings(false), &alert(AlertKind::NeedsYou)).to_string();
-        assert!(!body.contains("secret-project") && !body.contains("rm -rf"), "{body}");
+        let body = payload(&settings(false), &alert(AlertKind::NeedsYou), &details()).to_string();
+        for secret in ["secret-project", "rm -rf", "Secret title", "secret prompt", "opus", "2.78"] {
+            assert!(!body.contains(secret), "{secret} leaked: {body}");
+        }
         assert!(body.contains("\"priority\":4"));
+        assert!(body.contains("Copilot needs you")); // the right app, not always "Claude"
     }
 
     #[test]
     fn details_only_when_opted_in() {
-        let body = payload(&settings(true), &alert(AlertKind::NeedsYou)).to_string();
-        assert!(body.contains("secret-project") && body.contains("rm -rf"));
+        let body = payload(&settings(true), &alert(AlertKind::NeedsYou), &details());
+        assert_eq!(body["title"], "Copilot needs you · secret-project");
+        assert_eq!(body["message"], "Secret title\nAllow rm -rf build?\n$2.78 so far · opus-5-5");
+        let mut done = alert(AlertKind::Done);
+        done.took_secs = Some(754);
+        let body = payload(&settings(true), &done, &details());
+        assert_eq!(body["message"], "Secret title\nYou asked: secret prompt\nWorked 12m · $2.78 so far · opus-5-5");
+        // nothing known: still a valid message
+        assert_eq!(payload(&settings(true), &done, &Details::default())["message"], "Worked 12m");
+        assert_eq!(took(45), "45s");
+        assert_eq!(took(3_900), "1h 5m");
     }
 
     /// Builds the real HTTPS client and fails fast against an unreachable address,

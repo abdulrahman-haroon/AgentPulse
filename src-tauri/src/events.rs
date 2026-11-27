@@ -145,6 +145,8 @@ pub struct Alert {
     pub body: String,
     /// Which session it is about (for the "not checked yet" badge). Empty when unknown.
     pub session: String,
+    /// How long the task ran, when known (hooks saw it start working). For the phone message.
+    pub took_secs: Option<i64>,
 }
 
 /// Updates session state for one event. Returns an alert when the user should be told.
@@ -153,12 +155,14 @@ pub fn apply(store: &mut HashMap<String, Live>, e: &HookEvent, now: Timestamp) -
     let project = clean(if e.project.is_empty() { "Claude Code" } else { &e.project });
     let message = clean(&e.message);
     let prev = store.get(&e.session_id).map(|l| l.state);
-    let alert = |kind, title: String, body: String| Some(Alert { kind, project: project.clone(), title, body, session: e.session_id.clone() });
+    let alert = |kind, title: String, body: String| Some(Alert { kind, project: project.clone(), title, body, session: e.session_id.clone(), took_secs: None });
+    // Working since → now: how long the task that just finished ran.
+    let took = store.get(&e.session_id).filter(|l| l.state == State::Working).map(|l| since.duration_since(l.since).as_secs()).filter(|s| *s >= 0);
 
     let (state, alert) = match e.event.as_str() {
         "SessionStart" => (State::Done, None),
         "UserPromptSubmit" => (State::Working, None),
-        "Stop" => (State::Done, alert(AlertKind::Done, format!("Claude finished: {project}"), "Task complete.".into())),
+        "Stop" => (State::Done, alert(AlertKind::Done, format!("Claude finished: {project}"), "Task complete.".into()).map(|a| Alert { took_secs: took, ..a })),
         // Claude Code also sends an "idle" reminder after a finished turn; don't re-alert for it.
         "Notification" if e.notification_type == "idle_prompt" && prev == Some(State::Done) => (State::Done, None),
         "Notification" => (State::NeedsYou, alert(AlertKind::NeedsYou, format!("Claude needs you: {project}"), message.clone())),
@@ -317,6 +321,20 @@ mod tests {
         apply(&mut s, &ev("SessionEnd", "a"), now);
         assert_eq!(s["a"].state, State::Ended);
         assert_eq!(apply(&mut s, &ev("PreToolUse", "a"), now), None);
+    }
+
+    #[test]
+    fn stop_reports_how_long_the_task_ran() {
+        let mut s = HashMap::new();
+        let start = Timestamp::now();
+        let mut prompt = ev("UserPromptSubmit", "a");
+        prompt.ts = start.to_string();
+        apply(&mut s, &prompt, start);
+        let mut stop = ev("Stop", "a");
+        stop.ts = (start + SignedDuration::from_secs(754)).to_string();
+        assert_eq!(apply(&mut s, &stop, start).unwrap().took_secs, Some(754));
+        // a Stop without a Working before it (e.g. app started mid-task): unknown, not zero
+        assert_eq!(apply(&mut s, &ev("Stop", "b"), start).unwrap().took_secs, None);
     }
 
     #[test]

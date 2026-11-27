@@ -152,7 +152,7 @@ export default function Widget() {
               const open = !folded.includes(g.provider);
               const more = g.sessions.length - ROWS_PER_GROUP;
               return (
-                <section key={g.provider} className="w-group" aria-label={g.label}>
+                <section key={g.provider} className={`w-group w-group-${g.provider}`} aria-label={g.label}>
                   <button className={`w-ghead ${open ? "" : "w-ghead-folded"}`} aria-expanded={open} onClick={() => toggleGroup(g.provider)}>
                     <ChevronIcon size={12} />
                     <span className={`w-gmark w-gmark-${g.provider}`} aria-hidden="true" />
@@ -174,7 +174,7 @@ export default function Widget() {
                                   {unchecked.has(s.id) && <span className="w-new" title="Finished, not checked yet">new</span>}
                                   <span className="w-cost">{s.provider === "copilot" ? `${s.requests} req` : money(s.cost)}</span>
                                 </span>
-                                <span className="w-sub">{s.project || "unknown project"} · {when(s, now)}</span>
+                                <span className="w-sub">{s.project || "unknown project"} · <span className={`w-when w-when-${s.state}`}>{when(s, now)}</span></span>
                                 {s.state === "needs_you" && s.message && <span className="w-msg">{s.message}</span>}
                               </span>
                             </button>

@@ -79,20 +79,29 @@ fn save_settings(state: TauriState<'_, AppState>, settings: settings::Settings) 
     Ok(settings)
 }
 
-/// Sends a sample "needs you" push with the given (unsaved) settings so the user can check their phone.
+/// Sends an example "finished" push with the given (unsaved) settings, so the user sees on their
+/// phone exactly what real alerts will look like (generic or detailed). Example data, not theirs.
 #[tauri::command]
 async fn test_push(push: settings::PushSettings) -> Result<(), String> {
     settings::validate_push(&push)?;
     let sample = events::Alert {
-        kind: AlertKind::NeedsYou,
-        project: "AgentPulse".into(),
-        title: "AgentPulse test".into(),
-        body: "Phone notifications are working.".into(),
+        kind: AlertKind::Done,
+        project: "example-project".into(),
+        title: String::new(),
+        body: String::new(),
         session: String::new(),
+        took_secs: Some(754),
     };
-    let mut body = push::payload(&push, &sample);
-    body["title"] = "AgentPulse test".into();
-    body["message"] = "Phone notifications are working.".into();
+    let details = push::Details {
+        agent: "Claude Code".into(),
+        session_title: "Add dark mode toggle".into(),
+        last_prompt: "add a dark mode toggle to the settings page and remember the choice".into(),
+        model: "claude-opus-5-5".into(),
+        cost: Some(2.78),
+    };
+    let mut body = push::payload(&push, &sample, &details);
+    body["title"] = format!("Test: {}", body["title"].as_str().unwrap_or_default()).into();
+    body["message"] = format!("{}\n(example from AgentPulse, it's working)", body["message"].as_str().unwrap_or_default()).into();
     push::send(&push, &body).await
 }
 
@@ -114,6 +123,23 @@ fn test_sound(kind: String) {
     sound::play(if kind == "needs_you" { AlertKind::NeedsYou } else { AlertKind::Done });
 }
 
+/// What our own log index knows about a session, for the phone message. Hook-only sessions
+/// (no log yet) are Claude Code with nothing else known.
+fn push_details(app: &AppHandle, session: &str) -> push::Details {
+    let state = app.state::<AppState>();
+    let Ok(cache) = state.cache.lock() else { return push::Details::default() };
+    let meta = cache.meta();
+    let m = meta.get(session);
+    let costs: Vec<f64> = cache.requests().filter(|r| r.session == session).filter_map(|r| r.cost).collect();
+    push::Details {
+        agent: m.map_or(Provider::Claude, |m| m.provider).label().to_string(),
+        session_title: cache.titles().get(session).map(|t| t.to_string()).unwrap_or_default(),
+        last_prompt: m.map(|m| m.last_prompt.clone()).unwrap_or_default(),
+        model: m.and_then(|m| m.model.clone()).filter(|x| !x.starts_with('<')).unwrap_or_default(),
+        cost: (!costs.is_empty()).then(|| costs.iter().sum()),
+    }
+}
+
 /// Desktop notification and chime for every alert; phone push if the user turned it on.
 fn on_alert(app: &AppHandle, alert: &events::Alert) {
     use tauri_plugin_notification::NotificationExt;
@@ -130,7 +156,7 @@ fn on_alert(app: &AppHandle, alert: &events::Alert) {
         sound::play(alert.kind);
     }
     if push::wanted(&s.push, alert) {
-        let body = push::payload(&s.push, alert);
+        let body = push::payload(&s.push, alert, &push_details(app, &alert.session));
         tauri::async_runtime::spawn(async move {
             if let Err(e) = push::send(&s.push, &body).await {
                 eprintln!("[agentpulse] phone push failed: {e}");
@@ -182,9 +208,11 @@ async fn open_session(app: AppHandle, id: String) -> Result<(), String> {
 #[tauri::command]
 async fn focus_session(app: AppHandle, id: String) -> Result<(), String> {
     blocking(app, move |s| {
-        let cwd = s.cache.lock().map_err(|e| e.to_string())?.meta().get(id.as_str()).map(|m| m.cwd.clone()).ok_or("Unknown session.")?;
+        let m = s.cache.lock().map_err(|e| e.to_string())?.meta().get(id.as_str()).map(|m| (*m).clone()).ok_or("Unknown session.")?;
         mark_checked(s, &id);
-        actions::open_in_vscode(&id, &cwd)
+        // Claude Code sessions that live in VS Code open their chat; the rest open their project.
+        let in_extension = m.provider == Provider::Claude && m.entrypoint.contains("vscode");
+        actions::open_in_vscode(&id, &m.cwd, in_extension)
     })
     .await
 }
@@ -548,7 +576,7 @@ fn spawn_monitor(app: AppHandle) {
                             AlertKind::NeedsYou => ("needs you", "Waiting for your approval."),
                         };
                         let title = format!("{} {what}: {}", s.provider.label(), s.project);
-                        on_alert(&app, &events::Alert { kind, project: s.project.clone(), title, body: body.into(), session: id.to_string() });
+                        on_alert(&app, &events::Alert { kind, project: s.project.clone(), title, body: body.into(), session: id.to_string(), took_secs: None });
                     }
                 }
                 let live = state.live.lock().map(|l| l.clone()).unwrap_or_default();

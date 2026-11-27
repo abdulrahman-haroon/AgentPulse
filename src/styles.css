@@ -72,6 +72,9 @@
     --done-soft: rgba(4, 120, 87, 0.09);
     --agents: #7e22ce;
     --agents-soft: rgba(126, 34, 206, 0.08);
+    --claude: #c2410c;
+    --codex: #52525b;
+    --copilot: #7c3aed;
     --up: #be123c;
     --down: #047857;
     --error: #b42318;
@@ -471,8 +474,14 @@ button:disabled { opacity: 0.5; cursor: default; filter: none; }
 .approval-compact .approval-detail pre { max-height: 140px; font-size: 11.5px; }
 .approval-compact .approval-actions { justify-content: flex-end; }
 .w-body { overflow-y: auto; min-height: 0; padding: 6px 8px 8px; display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--border); }
-.w-group { display: flex; flex-direction: column; gap: 2px; padding-bottom: 4px; }
-.w-group + .w-group { border-top: 1px solid var(--border); padding-top: 6px; }
+.w-group {
+  display: flex; flex-direction: column; gap: 2px; padding: 3px 4px 5px 6px; border-radius: 12px;
+  background: color-mix(in srgb, var(--agent) 8%, transparent);
+  box-shadow: inset 3px 0 0 var(--agent), inset 0 0 0 1px color-mix(in srgb, var(--agent) 18%, transparent);
+}
+.w-group-claude { --agent: var(--claude); }
+.w-group-codex { --agent: var(--codex); }
+.w-group-copilot { --agent: var(--copilot); }
 .w-ghead {
   display: flex; align-items: center; gap: 7px; width: 100%; text-align: left;
   border: 0; background: transparent; border-radius: 8px; padding: 4px 6px; color: var(--ink-2); font-size: 12px;
@@ -481,7 +490,7 @@ button:disabled { opacity: 0.5; cursor: default; filter: none; }
 .w-ghead svg { color: var(--muted); transition: transform 0.15s; flex: none; }
 .w-ghead-folded svg { transform: rotate(-90deg); }
 .w-gmark { width: 8px; height: 8px; border-radius: 2px; flex: none; }
-.w-gname { font-weight: 700; color: var(--ink); white-space: nowrap; }
+.w-gname { font-weight: 700; color: var(--agent); white-space: nowrap; }
 .w-gcounts { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
 .w-gtoday { color: var(--ink-2); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .w-more { align-self: flex-start; margin-left: 26px; border: 0; background: transparent; color: var(--accent); font-size: 11.5px; padding: 2px 0; }
@@ -500,6 +509,14 @@ button:disabled { opacity: 0.5; cursor: default; filter: none; }
 .w-title { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
 .w-cost { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .w-sub { font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Active rows stand out (tint + status bar + status-colored time); finished rows step back. */
+.w-row-working { background: var(--working-soft); box-shadow: inset 2px 0 0 var(--working); }
+.w-row-needs_you { background: var(--needs-soft); box-shadow: inset 2px 0 0 var(--needs); }
+.w-row-working:hover { background: color-mix(in srgb, var(--working) 20%, transparent); }
+.w-row-needs_you:hover { background: color-mix(in srgb, var(--needs) 22%, transparent); }
+.w-row-done .w-title { font-weight: 500; color: var(--ink-2); }
+.w-when-working { color: var(--working); font-weight: 600; }
+.w-when-needs_you { color: var(--needs); font-weight: 600; }
 .w-msg { font-size: 11.5px; color: var(--needs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .w-empty { color: var(--muted); font-size: 12.5px; padding: 10px 6px 4px; }
 .w-err { margin: 0 8px 4px 26px; font-size: 11.5px; color: var(--error); }
