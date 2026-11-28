@@ -160,6 +160,9 @@ pub fn apply(store: &mut HashMap<String, Live>, e: &HookEvent, now: Timestamp) -
     let took = store.get(&e.session_id).filter(|l| l.state == State::Working).map(|l| since.duration_since(l.since).as_secs()).filter(|s| *s >= 0);
 
     let (state, alert) = match e.event.as_str() {
+        // A resumed session can report SessionStart right after the prompt that resumed it: that
+        // must not cancel Working. Otherwise a session that (re)starts waits for you.
+        "SessionStart" if store.get(&e.session_id).is_some_and(|l| l.state == State::Working && since.duration_since(l.since) < SignedDuration::from_secs(30)) => return None,
         "SessionStart" => (State::Done, None),
         "UserPromptSubmit" => (State::Working, None),
         "Stop" => (State::Done, alert(AlertKind::Done, format!("Claude finished: {project}"), "Task complete.".into()).map(|a| Alert { took_secs: took, ..a })),
@@ -321,6 +324,19 @@ mod tests {
         apply(&mut s, &ev("SessionEnd", "a"), now);
         assert_eq!(s["a"].state, State::Ended);
         assert_eq!(apply(&mut s, &ev("PreToolUse", "a"), now), None);
+    }
+
+    #[test]
+    fn session_start_right_after_a_prompt_keeps_working() {
+        let mut s = HashMap::new();
+        let t = Timestamp::now();
+        let at = |event: &str, secs: i64| HookEvent { ts: (t + SignedDuration::from_secs(secs)).to_string(), ..ev(event, "a") };
+        apply(&mut s, &at("UserPromptSubmit", 0), t);
+        apply(&mut s, &at("SessionStart", 1), t); // resume reports in after the prompt
+        assert_eq!(s["a"].state, State::Working);
+        apply(&mut s, &at("Stop", 60), t);
+        apply(&mut s, &at("SessionStart", 120), t); // a later start: waiting for you
+        assert_eq!(s["a"].state, State::Done);
     }
 
     #[test]
