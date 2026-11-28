@@ -34,10 +34,13 @@ try {
 
     # The user's own line works in both Git Bash and PowerShell (how Claude Code may run it).
     $line = Join-Path $root 'line.ps1'
-    Set-Content $line '$s = [Console]::In.ReadToEnd() | ConvertFrom-Json; [Console]::Out.Write("MINE " + $s.model.display_name + "`nsecond line")'
+    $got = Join-Path $root 'got.txt'
+    Set-Content $line ('$raw = [Console]::In.ReadToEnd(); [IO.File]::WriteAllText("' + ($got -replace '\\', '/') + '", $raw); $s = $raw | ConvertFrom-Json; [Console]::Out.Write("MINE " + $s.model.display_name + "`nsecond line")')
     Save-Original ('powershell -NoProfile -ExecutionPolicy Bypass -File "' + ($line -replace '\\', '/') + '"')
     $r = Invoke-Line $statusJson
-    Assert 'own line: runs with the same input, output passed through' ($r.out -eq "MINE Opus`nsecond line" -and $r.code -eq 0) "$($r | ConvertTo-Json -Compress)"
+    # On failure, show what the line received (length + first bytes) so CI says why.
+    $seen = if (Test-Path $got) { $t = [IO.File]::ReadAllText($got); "len=$($t.Length) head=" + (($t.ToCharArray() | Select-Object -First 12 | ForEach-Object { [int]$_ }) -join ',') } else { 'line never ran' }
+    Assert 'own line: runs with the same input, output passed through' ($r.out -eq "MINE Opus`nsecond line" -and $r.code -eq 0) "$($r | ConvertTo-Json -Compress) received: $seen"
 
     Save-Original $null
     $r = Invoke-Line '{"model":{"display_name":"Sonnet"}}'
