@@ -84,7 +84,11 @@ if ($command) {
             $psi.EnvironmentVariables['AGENTPULSE_STATUSLINE_COMMAND'] = $command
         } else {
             $psi.FileName = 'powershell.exe'
-            $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
+            # This PowerShell passes our input on to the command. Left to its defaults it re-encodes
+            # it (OEM code page, then a BOM) and the user's line gets unreadable JSON.
+            $script = '$ProgressPreference = ''SilentlyContinue''; $u = [Text.UTF8Encoding]::new($false); ' +
+                '[Console]::InputEncoding = $u; $OutputEncoding = $u; [Console]::In.ReadToEnd() | ' + $command
+            $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script))
             $psi.Arguments = "-NoProfile -NonInteractive -EncodedCommand $encoded"
         }
         $psi.UseShellExecute = $false

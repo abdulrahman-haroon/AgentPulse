@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.4
+
+- **Fixed: a working Claude Code session could show as Done.** When a session was resumed, Claude Code reported "session started" right after your prompt, and AgentPulse took that as "waiting for you".
+- **Fixed: your own status line got unreadable input** on computers without Git Bash, so it could show blank values.
+
 ## 0.3.3
 
 - **Claude Code plan limits.** See how much of your 5-hour and weekly limits you've used (and your spend limit, if your plan has one), with the reset time, in the widget and on the Live page. The numbers are Claude Code's own, read from its status line (Pro and Max plans). Existing installs: click **Repair connection…** in Settings once; your own status line keeps working.
