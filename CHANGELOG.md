@@ -1,9 +1,9 @@
 # Changelog
 
-## 0.3.4
+## 0.3.5
 
 - **Fixed: a working Claude Code session could show as Done.** When a session was resumed, Claude Code reported "session started" right after your prompt, and AgentPulse took that as "waiting for you".
-- **Fixed: your own status line got unreadable input** on computers without Git Bash, so it could show blank values.
+- **Fixed: your own Claude Code status line could show blank values** after connecting AgentPulse. On computers whose console uses UTF-8 (or without Git Bash), the input passed to it started with an invisible byte-order mark it couldn't read.
 
 ## 0.3.3
 
