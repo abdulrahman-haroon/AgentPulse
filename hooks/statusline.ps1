@@ -99,7 +99,13 @@ if ($command) {
         $psi.RedirectStandardError = $true
         $psi.StandardOutputEncoding = [Text.UTF8Encoding]::new($false)
         $psi.WorkingDirectory = (Get-Location).ProviderPath
+        # .NET writes the console input encoding's byte-order mark into the child's stdin at start.
+        # With a UTF-8 console (code page 65001) that's a BOM in front of the user's JSON, so use
+        # the same code page without a BOM while starting it, then put the original back.
+        $prevIn = [Console]::InputEncoding
+        try { if ($prevIn.GetPreamble().Length -gt 0) { [Console]::InputEncoding = [Text.UTF8Encoding]::new($false) } } catch {}
         $p = [Diagnostics.Process]::Start($psi)
+        try { if (-not [Console]::InputEncoding.Equals($prevIn)) { [Console]::InputEncoding = $prevIn } } catch {}
         $out = $p.StandardOutput.ReadToEndAsync()
         $null = $p.StandardError.ReadToEndAsync()
         try {
