@@ -17,7 +17,8 @@ $status = $null
 
 try {
     $stdin = [Console]::OpenStandardInput()
-    $raw = (New-Object IO.StreamReader($stdin, [Text.UTF8Encoding]::new($false))).ReadToEnd()
+    # Some hosts send a byte-order mark first; passed on, it breaks the user's JSON parsing.
+    $raw = (New-Object IO.StreamReader($stdin, [Text.UTF8Encoding]::new($false))).ReadToEnd().TrimStart([char]0xFEFF)
     $status = $raw | ConvertFrom-Json
 } catch {}
 
